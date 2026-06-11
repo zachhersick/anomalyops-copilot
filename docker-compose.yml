@@ -1,0 +1,15 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: anomalyops-postgres
+    environment:
+      POSTGRES_USER: anomalyops
+      POSTGRES_PASSWORD: anomalyops
+      POSTGRES_DB: anomalyops
+    ports:
+      - "5432:5432"
+    volumes:
+      - anomalyops_postgres_data:/var/lib/postgresql/data
+
+volumes:
+  anomalyops_postgres_data:

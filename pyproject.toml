@@ -1,0 +1,44 @@
+[project]
+name = "anomalyops-copilot"
+version = "0.1.0"
+description = "AI engineering copilot for industrial anomaly detection operations."
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi",
+    "uvicorn",
+    "pydantic",
+    "pydantic-settings",
+    "python-dotenv",
+    "psycopg[binary]",
+    "sqlalchemy",
+    "pgvector",
+    "openai",
+    "numpy",
+    "pandas",
+    "tiktoken",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-cov",
+    "httpx",
+    "ruff",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = ["data_sources"]
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["copilot*"]
+exclude = ["data_sources*", "tests*", "docs*", "scripts*"]

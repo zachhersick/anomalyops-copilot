@@ -1,0 +1,32 @@
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Environment
+.env
+*.env
+
+# Generated data
+outputs/
+artifacts/
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# Large local source snapshots
+data_sources/**/full_outputs/
+data_sources/**/local_dbs/
+data_sources/**/model_artifacts/
+
+# OS/editor
+.DS_Store
+.vscode/
+.idea/
+*.egg-info/
+*.dist-info/
