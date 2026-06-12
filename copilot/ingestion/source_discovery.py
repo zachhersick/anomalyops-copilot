@@ -14,6 +14,12 @@ ALLOWED_EXTENSIONS = {
     ".csv",
 }
 
+ALLOWED_FILENAMES = {
+    "Dockerfile",
+    "Dockerfile.api",
+    "Dockerfile.dashboard",
+}
+
 SKIP_DIRS = {
     "__pycache__",
     ".pytest_cache",
@@ -29,13 +35,16 @@ def should_include_file(path: Path) -> bool:
     if not path.is_file():
         return False
     
-    if path.suffix.lower() not in ALLOWED_EXTENSIONS:
-        return False
-    
     if any(part in SKIP_DIRS for part in path.parts):
         return False
     
-    return True
+    if path.name in ALLOWED_FILENAMES:
+        return True
+    
+    if path.suffix.lower() in ALLOWED_EXTENSIONS:
+        return True
+    
+    return False
 
 
 def get_source_type(path: Path) -> str:
@@ -58,6 +67,15 @@ def get_source_type(path: Path) -> str:
     
     if extension == ".csv":
         return "csv"
+    
+    if path.name == "Dockerfile.api":
+        return "dockerfile"
+    
+    if path.name == "Dockerfile.dashboard":
+        return "dockerfile"
+    
+    if path.name == "Dockerfile":
+        return "dockerfile"
     
     return "text"
 

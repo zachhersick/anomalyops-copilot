@@ -69,3 +69,33 @@ def test_discover_source_documents_returns_stable_order():
     source_ids = [document.source_id for document in documents]
 
     assert source_ids == sorted(source_ids)
+    
+    
+def test_should_include_dockerfile_api(tmp_path):
+    path = tmp_path / "Dockerfile.api"
+    path.write_text("FROM python:3.11-slim", encoding="utf-8")
+
+    assert should_include_file(path)
+    
+    
+def test_should_include_dockerfile_dashboard(tmp_path):
+    path = tmp_path / "Dockerfile.dashboard"
+    path.write_text("FROM python:3.11-slim", encoding="utf-8")
+
+    assert should_include_file(path)
+    
+    
+def test_discover_source_documents_includes_dockerfiles():
+    root = Path("data_sources/anomaly_detection_platform")
+
+    documents = discover_source_documents(root)
+    paths = {document.path for document in documents}
+
+    assert "source_code/Dockerfile.api" in paths
+    assert "source_code/Dockerfile.dashboard" in paths
+    
+    
+def test_get_source_type_for_dockerfile_variant():
+    path = Path("source_code/Dockerfile.api")
+
+    assert get_source_type(path) == "dockerfile"
