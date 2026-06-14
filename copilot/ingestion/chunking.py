@@ -62,4 +62,18 @@ def chunk_source_document(
         chunks.append(source_chunk)
     
     return chunks
+
+
+def chunk_source_documents(
+    documents: list[SourceDocument],
+    max_lines: int = 80,
+    overlap_lines: int = 10,
+) -> list[SourceChunk]:
+    document_chunks = []
+    
+    for source_document in documents:
+        source_chunks = chunk_source_document(source_document, max_lines, overlap_lines)
+        document_chunks.extend(source_chunks)
+        
+    return document_chunks
     

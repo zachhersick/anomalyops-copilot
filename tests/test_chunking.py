@@ -1,8 +1,11 @@
 import pytest
 
-from pathlib import Path
-
-from copilot.ingestion.chunking import build_chunk_id, chunk_source_document, split_text_by_lines
+from copilot.ingestion.chunking import (
+    build_chunk_id,
+    chunk_source_document,
+    split_text_by_lines,
+    chunk_source_documents,
+)
 from copilot.schemas.source import SourceDocument
 
 
@@ -81,6 +84,57 @@ def test_chunk_source_document_preserves_metadata():
     assert chunk.content == "line 1\nline 2\nline 3"
     assert chunk.start_line == 1
     assert chunk.end_line == 3
+    
+    
+def test_chunk_source_documents_returns_flat_list():
+    first_document = make_source_document(make_lines(3))
+    second_document = SourceDocument(
+        source_id="project:other.py",
+        project_name="project",
+        source_type="python",
+        path="other.py",
+        file_name="other.py",
+        extension=".py",
+        content=make_lines(3),
+    )
+    
+    chunks = chunk_source_documents(
+        [first_document, second_document],
+        max_lines=10,
+        overlap_lines=2,
+    )
+    
+    assert len(chunks) == 2
+    assert chunks[0].source_id == "project:source.py"
+    assert chunks[1].source_id == "project:other.py"
+    
+    
+def test_chunk_source_documents_flattens_multiple_chunks_per_document():
+    first_document = make_source_document(make_lines(6))
+    second_document = SourceDocument(
+        source_id="project:other.py",
+        project_name="project",
+        source_type="python",
+        path="other.py",
+        file_name="other.py",
+        extension=".py",
+        content=make_lines(6),
+    )
+    
+    chunks = chunk_source_documents(
+        [first_document, second_document],
+        max_lines=3,
+        overlap_lines=0,
+    )
+    
+    assert len(chunks) == 4
+    assert [chunk.source_id for chunk in chunks] == [
+        "project:source.py",
+        "project:source.py",
+        "project:other.py",
+        "project:other.py",
+    ]
+    assert [chunk.chunk_index for chunk in chunks] == [0, 1, 0, 1]
     
     
 def make_lines(count: int) -> str:
