@@ -14,6 +14,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("query")
     parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--answer", action="store_true")
+    parser.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
     
     source_chunks = load_chunk_manifest(Path(args.manifest_path))
@@ -21,7 +22,10 @@ def main(argv: list[str] | None = None) -> int:
     
     if args.answer:
         grounded_answer = build_grounded_answer(args.query, scored_chunks)
-        print_grounded_answer(grounded_answer)
+        if args.json:
+            print_json_grounded_answer(grounded_answer)
+        else:
+            print_grounded_answer(grounded_answer)
     else:
         print_raw_results(scored_chunks)
     
@@ -51,6 +55,10 @@ def print_grounded_answer(grounded_answer: GroundedAnswer) -> None:
             f"[{citation.citation_id}] "
             f"{citation.source_path}:{citation.start_line}-{citation.end_line}"
         )
+        
+        
+def print_json_grounded_answer(grounded_answer: GroundedAnswer) -> None:
+    print(grounded_answer.model_dump_json())
         
 
 if __name__ == "__main__":

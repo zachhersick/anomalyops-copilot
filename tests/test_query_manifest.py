@@ -1,4 +1,5 @@
 import pytest
+import json
 
 from copilot.ingestion.manifest import write_chunk_manifest
 from copilot.schemas.chunk import SourceChunk
@@ -112,6 +113,163 @@ def test_query_manifest_answer_mode_respects_top_k(tmp_path, capsys):
     assert exit_code == 0
     assert "[1]" in captured.out
     assert "[2]" not in captured.out
+    
+    
+def test_query_manifest_answer_json_mode_prints_valid_json(tmp_path, capsys):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main(
+        [
+            str(manifest_path),
+            "prediction api",
+            "--answer",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert isinstance(data, dict)
+    
+    
+def test_query_manifest_answer_json_mode_includes_grounded_answer_keys(
+    tmp_path,
+    capsys,
+):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main(
+        [
+            str(manifest_path),
+            "prediction api",
+            "--answer",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert "answer" in data
+    assert "confidence" in data
+    assert "citations" in data
+    assert "refusal_reason" in data
+    
+    
+def test_query_manifest_answer_json_mode_includes_citation_fields(
+    tmp_path,
+    capsys,
+):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk(
+            chunk_id="chunk-1",
+            content="prediction api endpoint",
+            source_path="api.py",
+            start_line=10,
+            end_line=20,
+        ),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main(
+        [
+            str(manifest_path),
+            "prediction api",
+            "--answer",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+    citation = data["citations"][0]
+
+    assert exit_code == 0
+    assert citation["citation_id"] == 1
+    assert citation["source_path"] == "api.py"
+    assert citation["start_line"] == 10
+    assert citation["end_line"] == 20
+    
+    
+def test_query_manifest_answer_json_mode_preserves_readable_answer_mode(
+    tmp_path,
+    capsys,
+):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main([str(manifest_path), "prediction api", "--answer"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Answer:" in captured.out
+    assert "Confidence:" in captured.out
+    assert "Citations:" in captured.out
+
+    with pytest.raises(json.JSONDecodeError):
+        json.loads(captured.out)
+        
+        
+def test_query_manifest_answer_json_mode_preserves_raw_retrieval_mode(
+    tmp_path,
+    capsys,
+):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main([str(manifest_path), "prediction api"])
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Score:" in captured.out
+    assert "Source:" in captured.out
+    assert "Preview:" in captured.out
+    
+    
+def test_query_manifest_answer_json_mode_respects_top_k(tmp_path, capsys):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint", source_path="api.py"),
+        make_chunk("chunk-2", "dashboard summary view", source_path="dashboard.py"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main(
+        [
+            str(manifest_path),
+            "prediction api",
+            "--top-k",
+            "1",
+            "--answer",
+            "--json",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert len(data["citations"]) == 1
 
 
 def make_chunk(
