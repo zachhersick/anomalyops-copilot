@@ -80,6 +80,28 @@ def test_build_grounded_answer_refuses_when_no_scored_chunks_exist():
     assert grounded_answer.refusal_reason == "No relevant context was retrieved."
     
     
+def test_build_grounded_answer_refuses_top_score_less_than_min_score():
+    grounded_answer = build_grounded_answer("text", [make_scored_chunk(score=0.25)], 0.5)
+    
+    assert grounded_answer.answer == ""
+    assert grounded_answer.citations == []
+    assert grounded_answer.confidence == 0.0
+    assert (
+        grounded_answer.refusal_reason
+        == "Retrieved context was below the confidence threshold."
+    )
+    
+    
+def test_build_grounded_answer_accepts_top_score_greater_than_or_equal_to_min_score():
+    grounded_answer = build_grounded_answer(
+        "text",
+        [make_scored_chunk(score=0.75)],
+        min_score=0.5,
+    )
+
+    assert grounded_answer.answer == "I found relevant project context for this question."
+    assert grounded_answer.refusal_reason is None
+    
 def make_scored_chunk(
     chunk_id: str = "chunk-1",
     source_path: str = "source.py",
