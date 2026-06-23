@@ -270,6 +270,72 @@ def test_query_manifest_answer_json_mode_respects_top_k(tmp_path, capsys):
 
     assert exit_code == 0
     assert len(data["citations"]) == 1
+    
+    
+def test_query_manifest_answer_mode_refuses_when_min_score_is_too_high(
+    tmp_path,
+    capsys,
+):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main(
+        [
+            str(manifest_path),
+            "prediction api",
+            "--answer",
+            "--min-score",
+            "1.1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+
+    assert exit_code == 0
+    assert "Answer:" in captured.out
+    assert "Confidence: 0.0000" in captured.out
+    assert (
+        "Refusal reason: Retrieved context was below the confidence threshold."
+        in captured.out
+    )
+    assert "Citations:" in captured.out
+    
+    
+def test_query_manifest_answer_json_mode_refuses_when_min_score_is_too_high(
+    tmp_path,
+    capsys,
+):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main(
+        [
+            str(manifest_path),
+            "prediction api",
+            "--answer",
+            "--json",
+            "--min-score",
+            "1.1",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert data["answer"] == ""
+    assert data["citations"] == []
+    assert data["confidence"] == 0.0
+    assert (
+        data["refusal_reason"]
+        == "Retrieved context was below the confidence threshold."
+    )
 
 
 def make_chunk(
