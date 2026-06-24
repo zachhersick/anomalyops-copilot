@@ -16,6 +16,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--answer", action="store_true")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--min-score", type=float, default=0.0)
+    parser.add_argument("--show-context", action="store_true")
     args = parser.parse_args(argv)
     
     source_chunks = load_chunk_manifest(Path(args.manifest_path))
@@ -32,6 +33,9 @@ def main(argv: list[str] | None = None) -> int:
             print_json_grounded_answer(grounded_answer)
         else:
             print_grounded_answer(grounded_answer)
+            
+            if args.show_context:
+                print_citation_source_snippets(scored_chunks)
     else:
         print_raw_results(scored_chunks)
     
@@ -54,7 +58,7 @@ def print_grounded_answer(grounded_answer: GroundedAnswer) -> None:
     if grounded_answer.refusal_reason is not None:
         print(f"Refusal reason: {grounded_answer.refusal_reason}")
         
-    print("Citations: ")
+    print("Citations:")
     
     for citation in grounded_answer.citations:
         print(
@@ -65,7 +69,18 @@ def print_grounded_answer(grounded_answer: GroundedAnswer) -> None:
         
 def print_json_grounded_answer(grounded_answer: GroundedAnswer) -> None:
     print(grounded_answer.model_dump_json())
-        
+    
+    
+def print_citation_source_snippets(scored_chunks: list[ScoredChunk]) -> None:
+    print()
+    print("Context:")
+    
+    for i, scored_chunk in enumerate(scored_chunks, start=1):
+        chunk = scored_chunk.chunk
+        print(f"[{i}] {chunk.source_path}:{chunk.start_line}-{chunk.end_line}")
+        print(chunk.content)
+        print()
+                
 
 if __name__ == "__main__":
     raise SystemExit(main())
