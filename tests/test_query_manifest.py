@@ -336,7 +336,118 @@ def test_query_manifest_answer_json_mode_refuses_when_min_score_is_too_high(
         data["refusal_reason"]
         == "Retrieved context was below the confidence threshold."
     )
+    
+    
+def test_query_manifest_answer_show_context_contains_answer_confidence_citations_context(tmp_path, capsys):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
 
+    exit_code = main(
+        [
+            str(manifest_path),
+            "prediction api",
+            "--answer",
+            "--show-context",
+        ]
+    )
+    
+    captured = capsys.readouterr()
+    data = captured.out
+    
+    assert exit_code == 0
+    assert "Answer:" in data
+    assert "Confidence:" in data
+    assert "Citations:" in data
+    assert "Context:" in data
+    
+    
+def test_query_manifest_answer_show_context_includes_source_path_line_range(tmp_path, capsys):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "prediction api endpoint",
+            source_path="source.py",
+            start_line=10,
+            end_line=20,
+        )
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main(
+        [
+            str(manifest_path),
+            "prediction api",
+            "--answer",
+            "--show-context",
+        ]
+    )
+    
+    captured = capsys.readouterr()
+    data = captured.out
+    
+    assert exit_code == 0
+    assert "source.py:10-20" in data
+    
+    
+def test_query_manifest_answer_show_context_includes_chunk_content(tmp_path, capsys):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "prediction api endpoint",
+            source_path="source.py",
+            start_line=10,
+            end_line=20,
+        )
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main(
+        [
+            str(manifest_path),
+            "prediction api",
+            "--answer",
+            "--show-context",
+        ]
+    )
+    
+    captured = capsys.readouterr()
+    data = captured.out
+    
+    assert exit_code == 0
+    assert chunks[0].content in data
+    
+    
+def test_query_manifest_answer_json_show_context_still_outputs_only_json(
+    tmp_path,
+    capsys,
+):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    exit_code = main(
+        [
+            str(manifest_path),
+            "prediction api",
+            "--answer",
+            "--json",
+            "--show-context",
+        ]
+    )
+
+    captured = capsys.readouterr()
+    data = json.loads(captured.out)
+
+    assert exit_code == 0
+    assert isinstance(data, dict)
+    assert "Context:" not in captured.out
 
 def make_chunk(
     chunk_id: str,
