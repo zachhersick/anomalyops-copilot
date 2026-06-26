@@ -1,0 +1,190 @@
+from fastapi.testclient import TestClient
+
+from copilot.api.app import app
+from copilot.ingestion.manifest import write_chunk_manifest
+from copilot.schemas.chunk import SourceChunk
+
+
+def test_query_endpoint_returns_grounded_answer(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "The prediction API exposes a POST /predict endpoint.",
+            source_path="api.py",
+            start_line=10,
+            end_line=20,
+        ),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    response = post_query_with_manifest(
+        manifest_path,
+        {
+            "query": "prediction api",
+            "top_k": 3,
+            "min_score": 0.0,
+            "show_context": False,
+        },
+    )
+
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["answer"] == "I found relevant project context for this question."
+    assert isinstance(data["confidence"], float)
+    assert data["refusal_reason"] is None
+    assert data["citations"] == [
+        {
+            "citation_id": 1,
+            "source_path": "api.py",
+            "start_line": 10,
+            "end_line": 20,
+        }
+    ]
+
+
+def test_query_endpoint_respects_top_k(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint", source_path="api.py"),
+        make_chunk("chunk-2", "dashboard summary view", source_path="dashboard.py"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    response = post_query_with_manifest(
+        manifest_path,
+        {
+            "query": "prediction api",
+            "top_k": 1,
+            "min_score": 0.0,
+            "show_context": False,
+        },
+    )
+
+    data = response.json()
+
+    assert response.status_code == 200
+    assert len(data["citations"]) == 1
+
+
+def test_query_endpoint_respects_min_score_refusal(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint", source_path="api.py"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    response = post_query_with_manifest(
+        manifest_path,
+        {
+            "query": "prediction api",
+            "top_k": 3,
+            "min_score": 1.1,
+            "show_context": False,
+        },
+    )
+
+    data = response.json()
+
+    assert response.status_code == 200
+    assert data["answer"] == ""
+    assert data["confidence"] == 0.0
+    assert data["citations"] == []
+    assert (
+        data["refusal_reason"]
+        == "Retrieved context was below the confidence threshold."
+    )
+
+
+def test_query_endpoint_rejects_empty_query(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint", source_path="api.py"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    response = post_query_with_manifest(
+        manifest_path,
+        {
+            "query": "",
+            "top_k": 3,
+            "min_score": 0.0,
+            "show_context": False,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_query_endpoint_rejects_non_positive_top_k(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk("chunk-1", "prediction api endpoint", source_path="api.py"),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+
+    response = post_query_with_manifest(
+        manifest_path,
+        {
+            "query": "prediction api",
+            "top_k": 0,
+            "min_score": 0.0,
+            "show_context": False,
+        },
+    )
+
+    assert response.status_code == 422
+
+
+def test_query_endpoint_returns_error_when_manifest_path_not_configured():
+    clear_manifest_path()
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/query",
+            json={
+                "query": "prediction api",
+                "top_k": 3,
+                "min_score": 0.0,
+                "show_context": False,
+            },
+        )
+
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Manifest path is not configured."}
+
+
+def post_query_with_manifest(manifest_path, payload):
+    app.state.manifest_path = manifest_path
+
+    with TestClient(app) as client:
+        response = client.post("/query", json=payload)
+
+    clear_manifest_path()
+    return response
+
+
+def clear_manifest_path() -> None:
+    if hasattr(app.state, "manifest_path"):
+        del app.state.manifest_path
+
+
+def make_chunk(
+    chunk_id: str,
+    content: str,
+    source_path: str = "source.py",
+    start_line: int = 1,
+    end_line: int = 2,
+) -> SourceChunk:
+    return SourceChunk(
+        chunk_id=chunk_id,
+        source_id=source_path,
+        project_name="test-project",
+        source_type="python",
+        source_path=source_path,
+        chunk_index=0,
+        content=content,
+        start_line=start_line,
+        end_line=end_line,
+    )
