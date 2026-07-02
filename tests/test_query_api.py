@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from copilot.api.app import create_app
+from copilot.api.settings import ApiSettings
 from copilot.ingestion.manifest import write_chunk_manifest
 from copilot.schemas.chunk import SourceChunk
 
@@ -138,7 +139,7 @@ def test_query_endpoint_rejects_non_positive_top_k(tmp_path):
 
 
 def test_query_endpoint_returns_error_when_manifest_path_not_configured():
-    test_app = create_app()
+    test_app = create_app(settings=ApiSettings())
 
     with TestClient(test_app) as client:
         response = client.post(
@@ -156,7 +157,8 @@ def test_query_endpoint_returns_error_when_manifest_path_not_configured():
     
 
 def post_query_with_manifest(manifest_path, payload):
-    test_app = create_app(manifest_path=manifest_path)
+    settings = ApiSettings(manifest_path=manifest_path)
+    test_app = create_app(settings=settings)
 
     with TestClient(test_app) as client:
         return client.post("/query", json=payload)

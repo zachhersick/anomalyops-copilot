@@ -1,27 +1,20 @@
 from fastapi import FastAPI, HTTPException, Request
-from pathlib import Path
 
 from copilot.schemas.query import QueryRequest, QueryResponse
 from copilot.answering.grounded import build_grounded_answer
 from copilot.ingestion.manifest import load_chunk_manifest
 from copilot.retrieval.search import retrieve_relevant_chunks
+from copilot.api.settings import ApiSettings
 
 
-app = FastAPI(
-    title="AnomalyOps-Copilot API",
-    description="API RAG answers.",
-    version="0.1.0",
-)
-
-def create_app(manifest_path: Path | None = None) -> FastAPI:
+def create_app(settings: ApiSettings | None = None) -> FastAPI:
     app = FastAPI(
         title="AnomalyOps-Copilot API",
         description="API RAG answers.",
         version="0.1.0",
     )
     
-    if manifest_path is not None:
-        app.state.manifest_path = manifest_path
+    app.state.settings = settings or ApiSettings()
         
 
     @app.get("/health")
@@ -31,7 +24,8 @@ def create_app(manifest_path: Path | None = None) -> FastAPI:
 
     @app.post("/query", response_model=QueryResponse)
     def query(request: Request, query_request: QueryRequest) -> QueryResponse:
-        manifest_path = getattr(request.app.state, "manifest_path", None)
+        settings = request.app.state.settings
+        manifest_path = settings.manifest_path
         
         if manifest_path is None:
             raise HTTPException(
