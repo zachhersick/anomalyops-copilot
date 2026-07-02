@@ -1,6 +1,6 @@
 from fastapi.testclient import TestClient
 
-from copilot.api.app import app
+from copilot.api.app import create_app
 from copilot.ingestion.manifest import write_chunk_manifest
 from copilot.schemas.chunk import SourceChunk
 
@@ -138,9 +138,9 @@ def test_query_endpoint_rejects_non_positive_top_k(tmp_path):
 
 
 def test_query_endpoint_returns_error_when_manifest_path_not_configured():
-    clear_manifest_path()
+    test_app = create_app()
 
-    with TestClient(app) as client:
+    with TestClient(test_app) as client:
         response = client.post(
             "/query",
             json={
@@ -153,21 +153,13 @@ def test_query_endpoint_returns_error_when_manifest_path_not_configured():
 
     assert response.status_code == 500
     assert response.json() == {"detail": "Manifest path is not configured."}
-
+    
 
 def post_query_with_manifest(manifest_path, payload):
-    app.state.manifest_path = manifest_path
+    test_app = create_app(manifest_path=manifest_path)
 
-    with TestClient(app) as client:
-        response = client.post("/query", json=payload)
-
-    clear_manifest_path()
-    return response
-
-
-def clear_manifest_path() -> None:
-    if hasattr(app.state, "manifest_path"):
-        del app.state.manifest_path
+    with TestClient(test_app) as client:
+        return client.post("/query", json=payload)
 
 
 def make_chunk(

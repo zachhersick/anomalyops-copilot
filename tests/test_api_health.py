@@ -1,10 +1,11 @@
 from fastapi.testclient import TestClient
 
-from copilot.api.app import app
+from copilot.api.app import create_app
 
 
 def test_health_check_returns_ok():
-    client = TestClient(app)
+    test_app = create_app()
+    client = TestClient(test_app)
     
     response = client.get("/health")
 
