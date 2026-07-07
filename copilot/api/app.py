@@ -1,10 +1,8 @@
 from fastapi import FastAPI, HTTPException, Request
 
 from copilot.schemas.query import QueryRequest, QueryResponse
-from copilot.answering.grounded import build_grounded_answer
-from copilot.ingestion.manifest import load_chunk_manifest
-from copilot.retrieval.search import retrieve_relevant_chunks
 from copilot.api.settings import ApiSettings, load_api_settings
+from copilot.api.query_service import query_service
 
 
 def create_app(settings: ApiSettings | None = None) -> FastAPI:
@@ -27,31 +25,17 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         settings = request.app.state.settings
         manifest_path = settings.manifest_path
         
-        if manifest_path is None:
+        try:
+            query_response = query_service(manifest_path, query_request)
+        except ValueError:
             raise HTTPException(
                 status_code=500,
                 detail="Manifest path is not configured.",
             )
             
-        source_chunks = load_chunk_manifest(manifest_path)
-        selected_chunks = retrieve_relevant_chunks(
-            query=query_request.query,
-            chunks=source_chunks,
-            top_k=query_request.top_k
-        )
-        grounded_answer = build_grounded_answer(
-            query=query_request.query,
-            scored_chunks=selected_chunks,
-            min_score=query_request.min_score
-        )
+        return query_response
         
-        return QueryResponse(
-            answer=grounded_answer.answer,
-            confidence=grounded_answer.confidence,
-            citations=grounded_answer.citations,
-            refusal_reason=grounded_answer.refusal_reason,
-        )
-        
+
     return app
 
 
