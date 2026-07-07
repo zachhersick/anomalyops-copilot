@@ -4,7 +4,7 @@ from copilot.schemas.query import QueryRequest, QueryResponse
 from copilot.answering.grounded import build_grounded_answer
 from copilot.ingestion.manifest import load_chunk_manifest
 from copilot.retrieval.search import retrieve_relevant_chunks
-from copilot.api.settings import ApiSettings
+from copilot.api.settings import ApiSettings, load_api_settings
 
 
 def create_app(settings: ApiSettings | None = None) -> FastAPI:
@@ -55,4 +55,4 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     return app
 
 
-app = create_app()
+app = create_app(settings=load_api_settings())
