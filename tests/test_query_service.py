@@ -68,6 +68,51 @@ def test_service_handles_missing_manifest_path_in_same_way():
             None,
             make_query_request(query="prediction api"),
         )
+        
+        
+def test_service_show_context_equals_true(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "The prediction API exposes a POST /predict endpoint.",
+            source_path="api.py",
+            start_line=10,
+            end_line=20,
+        ),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+    
+    query_response = query_service(
+        manifest_path,
+        make_query_request(query="prediction api", show_context=True),
+    )
+    
+    assert query_response.context is not None
+    assert "[1]" in query_response.context
+    assert "api.py:10-20" in query_response.context
+    assert "The prediction API exposes a POST /predict endpoint." in query_response.context
+    
+    
+def test_service_show_context_equals_false(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "The prediction API exposes a POST /predict endpoint.",
+            source_path="api.py",
+            start_line=10,
+            end_line=20,
+        ),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+    
+    query_response = query_service(
+        manifest_path,
+        make_query_request(query="prediction api", show_context=False),
+    )
+    
+    assert query_response.context is None
     
     
 def make_query_request(

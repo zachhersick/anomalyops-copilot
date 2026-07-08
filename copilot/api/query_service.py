@@ -4,6 +4,7 @@ from copilot.schemas.query import QueryRequest, QueryResponse
 from copilot.answering.grounded import build_grounded_answer
 from copilot.ingestion.manifest import load_chunk_manifest
 from copilot.retrieval.search import retrieve_relevant_chunks
+from copilot.retrieval.context import format_retrieval_context
 
 
 def query_service(manifest_path: Path | None, query_request: QueryRequest) -> QueryResponse:
@@ -22,9 +23,15 @@ def query_service(manifest_path: Path | None, query_request: QueryRequest) -> Qu
         min_score=query_request.min_score,
     )
     
+    if query_request.show_context:
+        context = format_retrieval_context(selected_chunks)
+    else:
+        context = None
+    
     return QueryResponse(
         answer=grounded_answer.answer,
         confidence=grounded_answer.confidence,
         citations=grounded_answer.citations,
         refusal_reason=grounded_answer.refusal_reason,
+        context=context,
     )
