@@ -8,7 +8,7 @@ class ContextSnippet(BaseModel):
     start_line: int = Field(gt=0)
     end_line: int = Field(gt=0)
     content: str
-    score: float = Field(ge=0.0)
+    score: float
 
 
 class QueryRequest(BaseModel):
