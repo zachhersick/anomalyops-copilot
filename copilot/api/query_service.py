@@ -1,3 +1,5 @@
+import os
+
 from pathlib import Path
 
 from copilot.schemas.query import QueryRequest, QueryResponse, ContextSnippet
@@ -5,12 +7,15 @@ from copilot.answering.grounded import build_grounded_answer
 from copilot.ingestion.manifest import load_chunk_manifest
 from copilot.retrieval.search import retrieve_relevant_chunks
 from copilot.retrieval.context import format_retrieval_context
-from copilot.api.errors import ManifestNotConfiguredError
+from copilot.api.errors import ManifestNotConfiguredError, ManifestFileNotFoundError
 
 
 def query_service(manifest_path: Path | None, query_request: QueryRequest) -> QueryResponse:
     if manifest_path is None:
         raise ManifestNotConfiguredError("Manifest path is not configured.")
+    
+    if not os.path.isfile(manifest_path):
+        raise ManifestFileNotFoundError(f"{manifest_path} does not exist.")
         
     source_chunks = load_chunk_manifest(manifest_path)
     selected_chunks = retrieve_relevant_chunks(

@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException, Request
 from copilot.schemas.query import QueryRequest, QueryResponse
 from copilot.api.settings import ApiSettings, load_api_settings
 from copilot.api.query_service import query_service
-from copilot.api.errors import ManifestNotConfiguredError
+from copilot.api.errors import ManifestNotConfiguredError, ManifestFileNotFoundError
 
 
 def create_app(settings: ApiSettings | None = None) -> FastAPI:
@@ -32,6 +32,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=500,
                 detail="Manifest path is not configured.",
+            )
+        except ManifestFileNotFoundError:
+            raise HTTPException(
+                status_code=500,
+                detail="Manifest file was not found."
             )
             
         return query_response
