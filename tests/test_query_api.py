@@ -155,6 +155,77 @@ def test_query_endpoint_returns_error_when_manifest_path_not_configured():
     assert response.status_code == 500
     assert response.json() == {"detail": "Manifest path is not configured."}
     
+    
+def test_query_api_returns_context_when_show_context_is_true(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "The prediction API exposes a POST /predict endpoint.",
+            source_path="api.py",
+            start_line=10,
+            end_line=20
+        ),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+    
+    test_app = create_app(settings=ApiSettings(manifest_path=manifest_path))
+
+    with TestClient(test_app) as client:
+        response = client.post(
+            "/query",
+            json={
+                "query": "prediction api",
+                "top_k": 3,
+                "min_score": 0.0,
+                "show_context": True,
+            },
+        )
+        
+    assert response.status_code == 200    
+    
+    payload = response.json()
+    context = payload["context"]
+    
+    assert context is not None
+    assert "[1]" in context
+    assert "api.py:10-20" in context
+    assert "The prediction API exposes a POST /predict endpoint." in context
+    
+    
+def test_query_api_omits_context_when_show_context_is_false(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "The prediction API exposes a POST /predict endpoint.",
+            source_path="api.py",
+            start_line=10,
+            end_line=20
+        ),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+    
+    test_app = create_app(settings=ApiSettings(manifest_path=manifest_path))
+
+    with TestClient(test_app) as client:
+        response = client.post(
+            "/query",
+            json={
+                "query": "prediction api",
+                "top_k": 3,
+                "min_score": 0.0,
+                "show_context": False,
+            },
+        )
+        
+    assert response.status_code == 200
+        
+    payload = response.json()
+    context = payload["context"]
+
+    assert context is None
+    
 
 def post_query_with_manifest(manifest_path, payload):
     settings = ApiSettings(manifest_path=manifest_path)
