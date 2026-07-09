@@ -4,6 +4,7 @@ from copilot.api.query_service import query_service
 from copilot.ingestion.manifest import write_chunk_manifest
 from copilot.schemas.chunk import SourceChunk
 from copilot.schemas.query import QueryRequest, QueryResponse
+from copilot.api.errors import ManifestNotConfiguredError
 
 
 def test_service_returns_grounded_answer_with_citations(tmp_path):
@@ -63,7 +64,7 @@ def test_service_respects_min_score_refusal(tmp_path):
     
     
 def test_service_handles_missing_manifest_path_in_same_way():
-    with pytest.raises(ValueError, match="Manifest path is not configured."):
+    with pytest.raises(ManifestNotConfiguredError, match="Manifest path is not configured."):
         query_service(
             None,
             make_query_request(query="prediction api"),
@@ -123,6 +124,14 @@ def test_service_show_context_equals_false(tmp_path):
     
     assert query_response.context is None
     assert query_response.context_snippets == []
+    
+    
+def test_query_service_raises_manifest_not_configured_when_manifest_path_is_None():
+    with pytest.raises(ManifestNotConfiguredError):
+        query_service(
+            None,
+            make_query_request(query="prediction api"),
+        )
     
     
 def make_query_request(
