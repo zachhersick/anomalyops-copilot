@@ -1,3 +1,5 @@
+import pytest
+
 from fastapi.testclient import TestClient
 
 from copilot.api.app import create_app
@@ -98,46 +100,6 @@ def test_query_endpoint_respects_min_score_refusal(tmp_path):
     )
 
 
-def test_query_endpoint_rejects_empty_query(tmp_path):
-    manifest_path = tmp_path / "chunks.json"
-    chunks = [
-        make_chunk("chunk-1", "prediction api endpoint", source_path="api.py"),
-    ]
-    write_chunk_manifest(chunks, manifest_path)
-
-    response = post_query_with_manifest(
-        manifest_path,
-        {
-            "query": "",
-            "top_k": 3,
-            "min_score": 0.0,
-            "show_context": False,
-        },
-    )
-
-    assert response.status_code == 422
-
-
-def test_query_endpoint_rejects_non_positive_top_k(tmp_path):
-    manifest_path = tmp_path / "chunks.json"
-    chunks = [
-        make_chunk("chunk-1", "prediction api endpoint", source_path="api.py"),
-    ]
-    write_chunk_manifest(chunks, manifest_path)
-
-    response = post_query_with_manifest(
-        manifest_path,
-        {
-            "query": "prediction api",
-            "top_k": 0,
-            "min_score": 0.0,
-            "show_context": False,
-        },
-    )
-
-    assert response.status_code == 422
-
-
 def test_query_endpoint_returns_error_when_manifest_path_not_configured():
     test_app = create_app(settings=ApiSettings())
 
@@ -164,7 +126,7 @@ def test_query_api_returns_context_when_show_context_is_true(tmp_path):
             "The prediction API exposes a POST /predict endpoint.",
             source_path="api.py",
             start_line=10,
-            end_line=20
+            end_line=20,
         ),
     ]
     write_chunk_manifest(chunks, manifest_path)
@@ -272,6 +234,42 @@ def test_query_api_context_none_when_show_context_default(tmp_path):
 
     assert context is None
     assert context_snippets == []
+    
+    
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"top_k": 3, "min_score": 0.0, "show_context": False},
+        {"query": "", "top_k": 3, "min_score": 0.0, "show_context": False},
+        {"query": "prediction api", "top_k": 0, "min_score": 0.0, "show_context": False},
+        {"query": "prediction api", "top_k": -1, "min_score": 0.0, "show_context": False},
+        {"query": "prediction api", "top_k": 3, "min_score": -0.1, "show_context": False},
+    ],
+)
+def test_invalid_query_request_returns_422(tmp_path, payload):
+    response = post_query(payload, tmp_path)
+    
+    assert response.status_code == 422
+    assert "detail" in response.json()
+    
+    
+def post_query(payload: dict, tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "The prediction API exposes a POST /predict endpoint.",
+            source_path="api.py",
+            start_line=10,
+            end_line=20,
+        ),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+    
+    test_app = create_app(settings=ApiSettings(manifest_path=manifest_path))
+
+    with TestClient(test_app) as client:
+        return client.post("/query", json=payload)
     
 
 def post_query_with_manifest(manifest_path, payload):
