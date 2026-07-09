@@ -253,6 +253,22 @@ def test_invalid_query_request_returns_422(tmp_path, payload):
     assert "detail" in response.json()
     
     
+def test_api_unconfigured_manifest_path_returns_500(tmp_path):
+    manifest_path = tmp_path / "missing.json"
+    test_app = create_app(settings=ApiSettings(manifest_path=manifest_path))
+
+    with TestClient(test_app) as client:
+        response = client.post(
+            "/query",
+            json={
+                "query": "prediction api",
+            },
+        )
+        
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Manifest file was not found."}
+    
+    
 def post_query(payload: dict, tmp_path):
     manifest_path = tmp_path / "chunks.json"
     chunks = [
