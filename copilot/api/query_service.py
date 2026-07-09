@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from copilot.schemas.query import QueryRequest, QueryResponse
+from copilot.schemas.query import QueryRequest, QueryResponse, ContextSnippet
 from copilot.answering.grounded import build_grounded_answer
 from copilot.ingestion.manifest import load_chunk_manifest
 from copilot.retrieval.search import retrieve_relevant_chunks
@@ -23,8 +23,22 @@ def query_service(manifest_path: Path | None, query_request: QueryRequest) -> Qu
         min_score=query_request.min_score,
     )
     
+    context_snippets = []
+    
     if query_request.show_context:
         context = format_retrieval_context(selected_chunks)
+        for i, selected_chunk in enumerate(selected_chunks, start=1):
+            chunk = selected_chunk.chunk
+            context_snippets.append(
+                ContextSnippet(
+                    citation_id=i,
+                    source_path=chunk.source_path,
+                    start_line=chunk.start_line,
+                    end_line=chunk.end_line,
+                    content=chunk.content,
+                    score=selected_chunk.score,
+                )
+            )
     else:
         context = None
     
@@ -34,4 +48,5 @@ def query_service(manifest_path: Path | None, query_request: QueryRequest) -> Qu
         citations=grounded_answer.citations,
         refusal_reason=grounded_answer.refusal_reason,
         context=context,
+        context_snippets=context_snippets,
     )
