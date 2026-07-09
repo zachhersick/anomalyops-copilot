@@ -93,6 +93,15 @@ def test_service_show_context_equals_true(tmp_path):
     assert "api.py:10-20" in query_response.context
     assert "The prediction API exposes a POST /predict endpoint." in query_response.context
     
+    snippet = query_response.context_snippets[0]
+    
+    assert snippet.citation_id == 1
+    assert snippet.source_path =="api.py"
+    assert snippet.start_line == 10
+    assert snippet.end_line == 20
+    assert snippet.content == "The prediction API exposes a POST /predict endpoint."
+    assert isinstance(snippet.score, float)
+    
     
 def test_service_show_context_equals_false(tmp_path):
     manifest_path = tmp_path / "chunks.json"
@@ -113,6 +122,7 @@ def test_service_show_context_equals_false(tmp_path):
     )
     
     assert query_response.context is None
+    assert query_response.context_snippets == []
     
     
 def make_query_request(

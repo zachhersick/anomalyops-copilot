@@ -186,11 +186,21 @@ def test_query_api_returns_context_when_show_context_is_true(tmp_path):
     
     payload = response.json()
     context = payload["context"]
+    context_snippets = payload["context_snippets"]
     
     assert context is not None
     assert "[1]" in context
     assert "api.py:10-20" in context
     assert "The prediction API exposes a POST /predict endpoint." in context
+    
+    snippet = context_snippets[0]
+    
+    assert snippet["citation_id"] == 1
+    assert snippet["source_path"] == "api.py"
+    assert snippet["start_line"] == 10
+    assert snippet["end_line"] == 20
+    assert snippet["content"] == "The prediction API exposes a POST /predict endpoint."
+    assert isinstance(snippet["score"], float)
     
     
 def test_query_api_omits_context_when_show_context_is_false(tmp_path):
@@ -201,7 +211,7 @@ def test_query_api_omits_context_when_show_context_is_false(tmp_path):
             "The prediction API exposes a POST /predict endpoint.",
             source_path="api.py",
             start_line=10,
-            end_line=20
+            end_line=20,
         ),
     ]
     write_chunk_manifest(chunks, manifest_path)
@@ -223,8 +233,45 @@ def test_query_api_omits_context_when_show_context_is_false(tmp_path):
         
     payload = response.json()
     context = payload["context"]
+    context_snippets = payload["context_snippets"]
 
     assert context is None
+    assert context_snippets == []
+    
+    
+def test_query_api_context_none_when_show_context_default(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "The prediction API exposes a POST /predict endpoint.",
+            source_path="api.py",
+            start_line=10,
+            end_line=20,
+        ),
+    ]
+    write_chunk_manifest(chunks, manifest_path)
+    
+    test_app = create_app(settings=ApiSettings(manifest_path=manifest_path))
+
+    with TestClient(test_app) as client:
+        response = client.post(
+            "/query",
+            json={
+                "query": "prediction api",
+                "top_k": 3,
+                "min_score": 0.0,
+            },
+        )
+        
+    assert response.status_code == 200
+        
+    payload = response.json()
+    context = payload["context"]
+    context_snippets = payload["context_snippets"]
+
+    assert context is None
+    assert context_snippets == []
     
 
 def post_query_with_manifest(manifest_path, payload):
