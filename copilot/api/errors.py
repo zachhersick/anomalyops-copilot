@@ -1,0 +1,2 @@
+class ManifestNotConfiguredError(Exception):
+    pass
