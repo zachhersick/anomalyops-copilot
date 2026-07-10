@@ -4,3 +4,7 @@ class ManifestNotConfiguredError(Exception):
 
 class ManifestFileNotFoundError(Exception):
     pass
+
+
+class InvalidManifestError(Exception):
+    pass
