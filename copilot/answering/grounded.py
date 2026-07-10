@@ -14,6 +14,7 @@ def build_grounded_answer(query: str, scored_chunks: list[ScoredChunk], min_scor
     
     citations = build_citations_from_scored_chunks(scored_chunks)
     top_score = max(scored_chunk.score for scored_chunk in scored_chunks)
+    highest_score_chunk = max(scored_chunks, key=lambda scored_chunk: scored_chunk.score)
     clamped_score = max(0.0, min(top_score, 1.0))
     
     if clamped_score < min_score:
@@ -25,7 +26,7 @@ def build_grounded_answer(query: str, scored_chunks: list[ScoredChunk], min_scor
         )
     
     return GroundedAnswer(
-        answer="I found relevant project context for this question.",
+        answer=f"The retrieved context says: {highest_score_chunk.chunk.content}",
         citations=citations,
         confidence=clamped_score,
         refusal_reason=None,

@@ -26,7 +26,7 @@ def test_service_returns_grounded_answer_with_citations(tmp_path):
     )
     
     assert isinstance(query_response, QueryResponse)
-    assert query_response.answer == "I found relevant project context for this question."
+    assert query_response.answer == "The retrieved context says: The prediction API exposes a POST /predict endpoint."
     assert isinstance(query_response.confidence, float)
     assert query_response.refusal_reason is None
     assert len(query_response.citations) == 1
