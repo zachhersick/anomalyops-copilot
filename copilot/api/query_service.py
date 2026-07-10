@@ -1,23 +1,31 @@
-import os
-
 from pathlib import Path
+from json import JSONDecodeError
+from pydantic import ValidationError
 
 from copilot.schemas.query import QueryRequest, QueryResponse, ContextSnippet
 from copilot.answering.grounded import build_grounded_answer
 from copilot.ingestion.manifest import load_chunk_manifest
 from copilot.retrieval.search import retrieve_relevant_chunks
 from copilot.retrieval.context import format_retrieval_context
-from copilot.api.errors import ManifestNotConfiguredError, ManifestFileNotFoundError
+from copilot.api.errors import (
+    ManifestNotConfiguredError,
+    ManifestFileNotFoundError,
+    InvalidManifestError
+)
 
 
 def query_service(manifest_path: Path | None, query_request: QueryRequest) -> QueryResponse:
     if manifest_path is None:
         raise ManifestNotConfiguredError("Manifest path is not configured.")
     
-    if not os.path.isfile(manifest_path):
+    if not manifest_path.is_file():
         raise ManifestFileNotFoundError(f"{manifest_path} does not exist.")
+    
+    try:
+        source_chunks = load_chunk_manifest(manifest_path)
+    except (JSONDecodeError, ValidationError) as exc:
+        raise InvalidManifestError("Manifest file is invalid.") from exc
         
-    source_chunks = load_chunk_manifest(manifest_path)
     selected_chunks = retrieve_relevant_chunks(
         query=query_request.query,
         chunks=source_chunks,

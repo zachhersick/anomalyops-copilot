@@ -4,7 +4,7 @@ from copilot.api.query_service import query_service
 from copilot.ingestion.manifest import write_chunk_manifest
 from copilot.schemas.chunk import SourceChunk
 from copilot.schemas.query import QueryRequest, QueryResponse
-from copilot.api.errors import ManifestNotConfiguredError, ManifestFileNotFoundError
+from copilot.api.errors import ManifestNotConfiguredError, ManifestFileNotFoundError, InvalidManifestError
 
 
 def test_service_returns_grounded_answer_with_citations(tmp_path):
@@ -138,6 +138,17 @@ def test_query_service_missing_manifest_file_returns_manifest_file_not_found_err
     manifest_path = tmp_path / "missing.json"
     
     with pytest.raises(ManifestFileNotFoundError):
+        query_service(
+            manifest_path,
+            make_query_request(query="prediction api"),
+        )
+        
+        
+def test_query_service_invalid_manifest(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    manifest_path.write_text("{not valid json", encoding="utf-8")
+    
+    with pytest.raises(InvalidManifestError):
         query_service(
             manifest_path,
             make_query_request(query="prediction api"),

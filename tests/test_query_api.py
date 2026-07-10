@@ -269,6 +269,24 @@ def test_api_unconfigured_manifest_path_returns_500(tmp_path):
     assert response.json() == {"detail": "Manifest file was not found."}
     
     
+def test_api_manifest_file_invalid(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+    manifest_path.write_text("{not valid json", encoding="utf-8")
+    
+    test_app = create_app(settings=ApiSettings(manifest_path=manifest_path))
+    
+    with TestClient(test_app) as client:
+        response = client.post(
+            "/query",
+            json={
+                "query": "prediction api",
+            },
+        )
+        
+    assert response.status_code == 500
+    assert response.json() == {"detail": "Manifest file is invalid."}
+    
+    
 def post_query(payload: dict, tmp_path):
     manifest_path = tmp_path / "chunks.json"
     chunks = [
