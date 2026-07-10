@@ -1,0 +1,76 @@
+[
+  {
+    "case_id": "supported-anomaly-types",
+    "query": "What anomaly types does the platform generate?",
+    "expected_source_paths": [
+      "README.md",
+      "source_code/generator.py"
+    ],
+    "top_k": 3
+  },
+  {
+    "case_id": "sensor-feature-engineering",
+    "query": "What time-series features are engineered from the sensor data?",
+    "expected_source_paths": [
+      "README.md",
+      "source_code/features.py"
+    ],
+    "top_k": 3
+  },
+  {
+    "case_id": "model-anomaly-threshold",
+    "query": "What anomaly probability threshold does the model use?",
+    "expected_source_paths": [
+      "README.md",
+      "source_code/config.py",
+      "source_code/model.py"
+    ],
+    "top_k": 3
+  },
+  {
+    "case_id": "alert-severity-levels",
+    "query": "What severity levels can an alert have?",
+    "expected_source_paths": [
+      "README.md",
+      "source_code/alerts.py"
+    ],
+    "top_k": 3
+  },
+  {
+    "case_id": "alert-event-grouping",
+    "query": "How are consecutive alerts grouped into alert events?",
+    "expected_source_paths": [
+      "README.md",
+      "source_code/alert_events.py"
+    ],
+    "top_k": 3
+  },
+  {
+    "case_id": "sqlite-storage-tables",
+    "query": "Which SQLite tables store pipeline runs, predictions, and alerts?",
+    "expected_source_paths": [
+      "README.md",
+      "source_code/db.py"
+    ],
+    "top_k": 3
+  },
+  {
+    "case_id": "prediction-api-input",
+    "query": "Does the prediction endpoint accept raw sensor readings or engineered features?",
+    "expected_source_paths": [
+      "README.md",
+      "source_code/api.py",
+      "source_code/model_serving.py"
+    ],
+    "top_k": 3
+  },
+  {
+    "case_id": "dashboard-data-flow",
+    "query": "How does the Streamlit dashboard obtain anomaly detection results?",
+    "expected_source_paths": [
+      "README.md",
+      "source_code/dashboard.py"
+    ],
+    "top_k": 3
+  }
+]
