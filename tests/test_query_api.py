@@ -34,7 +34,7 @@ def test_query_endpoint_returns_grounded_answer(tmp_path):
     data = response.json()
 
     assert response.status_code == 200
-    assert data["answer"] == "I found relevant project context for this question."
+    assert data["answer"] == "The retrieved context says: The prediction API exposes a POST /predict endpoint."
     assert isinstance(data["confidence"], float)
     assert data["refusal_reason"] is None
     assert data["citations"] == [

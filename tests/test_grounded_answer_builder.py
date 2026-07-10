@@ -25,7 +25,7 @@ def test_build_grounded_answer_mentions_retrieved_context_exists():
     query = "text"
     grounded_answer = build_grounded_answer(query, scored_chunks)
     
-    assert "relevant project context" in grounded_answer.answer
+    assert "The retrieved context says" in grounded_answer.answer
     
     
 def test_build_grounded_answer_confidence_comes_from_top_score():
@@ -99,8 +99,32 @@ def test_build_grounded_answer_accepts_top_score_greater_than_or_equal_to_min_sc
         min_score=0.5,
     )
 
-    assert grounded_answer.answer == "I found relevant project context for this question."
+    assert grounded_answer.answer == "The retrieved context says: chunk content"
     assert grounded_answer.refusal_reason is None
+    
+    
+def test_build_grounded_answer_returns_deterministic_answer():
+    scored_chunks  = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            source_path="source.py",
+            start_line=1,
+            end_line=2,
+            score=0.90,
+        ),
+        make_scored_chunk(
+            chunk_id="chunk-2",
+            source_path="source.py",
+            start_line=3,
+            end_line=4,
+            score=0.5,
+        )
+    ]
+    query = "chunk"
+    grounded_answer = build_grounded_answer(query, scored_chunks)
+    
+    assert grounded_answer.answer == "The retrieved context says: chunk content"
+    
     
 def make_scored_chunk(
     chunk_id: str = "chunk-1",
