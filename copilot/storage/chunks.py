@@ -1,5 +1,6 @@
 from sqlalchemy.dialects.postgresql import insert
 from sqlalchemy.dialects.postgresql.dml import Insert
+from sqlalchemy.orm import Session
 
 from copilot.schemas.chunk import SourceChunk
 from copilot.storage.models import EMBEDDING_DIMENSIONS
@@ -49,3 +50,21 @@ def build_source_chunk_upsert_statement(chunks: list[SourceChunk]) -> Insert:
     )
     
     return statement
+
+
+def store_source_chunks(
+    session: Session,
+    chunks: list[SourceChunk],
+) -> int:
+    if not chunks:
+        return 0
+    
+    try:
+        statement = build_source_chunk_upsert_statement(chunks)
+        session.execute(statement)
+        session.commit()
+    except Exception:
+        session.rollback()
+        raise
+    
+    return len(chunks)
