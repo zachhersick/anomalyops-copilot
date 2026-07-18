@@ -3,7 +3,12 @@ from fastapi import FastAPI, HTTPException, Request
 from copilot.schemas.query import QueryRequest, QueryResponse
 from copilot.api.settings import ApiSettings, load_api_settings
 from copilot.api.query_service import query_service
-from copilot.api.errors import ManifestNotConfiguredError, ManifestFileNotFoundError, InvalidManifestError
+from copilot.api.errors import (
+    ManifestNotConfiguredError,
+    ManifestFileNotFoundError,
+    InvalidManifestError,
+    DatabaseNotConfiguredError,
+)
 
 
 def create_app(settings: ApiSettings | None = None) -> FastAPI:
@@ -24,10 +29,9 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     @app.post("/query", response_model=QueryResponse)
     def query(request: Request, query_request: QueryRequest) -> QueryResponse:
         settings = request.app.state.settings
-        manifest_path = settings.manifest_path
         
         try:
-            query_response = query_service(manifest_path, query_request)
+            query_response = query_service(settings, query_request)
         except ManifestNotConfiguredError:
             raise HTTPException(
                 status_code=500,
@@ -42,6 +46,11 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
             raise HTTPException(
                 status_code=500,
                 detail="Manifest file is invalid."
+            )
+        except DatabaseNotConfiguredError:
+            raise HTTPException(
+                status_code=500,
+                detail="Database URL is not configured."
             )
             
         return query_response

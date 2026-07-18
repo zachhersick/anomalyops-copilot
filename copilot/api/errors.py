@@ -8,3 +8,7 @@ class ManifestFileNotFoundError(Exception):
 
 class InvalidManifestError(Exception):
     pass
+
+
+class DatabaseNotConfiguredError(RuntimeError):
+    pass

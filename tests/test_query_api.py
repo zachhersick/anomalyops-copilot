@@ -1,11 +1,14 @@
 import pytest
 
 from fastapi.testclient import TestClient
+from unittest.mock import patch
 
 from copilot.api.app import create_app
 from copilot.api.settings import ApiSettings
 from copilot.ingestion.manifest import write_chunk_manifest
 from copilot.schemas.chunk import SourceChunk
+from copilot.api.errors import DatabaseNotConfiguredError
+from copilot.schemas.query import QueryResponse
 
 
 def test_query_endpoint_returns_grounded_answer(tmp_path):
@@ -285,6 +288,78 @@ def test_api_manifest_file_invalid(tmp_path):
         
     assert response.status_code == 500
     assert response.json() == {"detail": "Manifest file is invalid."}
+    
+    
+def test_query_endpoint_passes_full_settings_to_query_service():
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url="postgresql+psycopg://test",
+    )
+    expected_response = QueryResponse(
+        answer="Grounded answer",
+        confidence=0.9,
+        citations=[],
+        refusal_reason=None,
+        context=None,
+        context_snippets=[],
+    )
+
+    test_app = create_app(settings=settings)
+
+    with patch(
+        "copilot.api.app.query_service",
+        return_value=expected_response,
+    ) as query_service:
+        with TestClient(test_app) as client:
+            response = client.post(
+                "/query",
+                json={
+                    "query": "prediction api",
+                    "top_k": 3,
+                    "min_score": 0.0,
+                    "show_context": False,
+                },
+            )
+
+    assert response.status_code == 200
+
+    query_service.assert_called_once()
+
+    called_settings, called_request = query_service.call_args.args
+
+    assert called_settings is settings
+    assert called_request.query == "prediction api"
+    assert called_request.top_k == 3
+    
+    
+def test_query_endpoint_maps_missing_database_url_to_500():
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url=None,
+    )
+    test_app = create_app(settings=settings)
+
+    with patch(
+        "copilot.api.app.query_service",
+        side_effect=DatabaseNotConfiguredError(
+            "Database URL is not configured."
+        ),
+    ):
+        with TestClient(test_app) as client:
+            response = client.post(
+                "/query",
+                json={
+                    "query": "prediction api",
+                    "top_k": 3,
+                    "min_score": 0.0,
+                    "show_context": False,
+                },
+            )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "Database URL is not configured."
+    }
     
     
 def post_query(payload: dict, tmp_path):
