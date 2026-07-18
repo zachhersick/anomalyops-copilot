@@ -26,6 +26,7 @@ jobs:
 
     env:
       DATABASE_URL: postgresql+psycopg://anomalyops:anomalyops@localhost:5432/anomalyops_test
+      ANOMALYOPS_TEST_DATABASE_URL: postgresql+psycopg://anomalyops:anomalyops@localhost:5432/anomalyops_test
       OPENAI_API_KEY: test-key
 
     steps:
@@ -45,5 +46,8 @@ jobs:
       - name: Lint
         run: ruff check .
 
-      - name: Run tests
-        run: pytest
+      - name: Run unit tests
+        run: pytest -m "not integration"
+
+      - name: Run integration tests
+        run: pytest -m integration

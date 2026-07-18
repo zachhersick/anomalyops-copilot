@@ -29,6 +29,9 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
+markers = [
+    "integration: tests that require a real PostgreSQL/pgvector database"
+]
 
 [tool.ruff]
 line-length = 100
