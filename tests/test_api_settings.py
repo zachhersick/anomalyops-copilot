@@ -49,3 +49,72 @@ def test_load_api_settings_reads_manifest_path_from_environment(monkeypatch):
     settings = load_api_settings()
 
     assert settings.manifest_path == Path("outputs/chunks.json")
+    
+    
+def test_api_settings_defaults_retrieval_backend_to_manifest():
+    settings = ApiSettings()
+    
+    assert settings.retrieval_backend == "manifest"
+    
+    
+def test_api_settings_defaults_database_url_to_none():
+    settings = ApiSettings(retrieval_backend="pgvector")
+    
+    assert settings.database_url is None
+    
+    
+def test_load_api_settings_defaults_to_manifest_backend(monkeypatch):
+    monkeypatch.delenv(
+        "ANOMALYOPS_RETRIEVAL_BACKEND",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "ANOMALYOPS_MANIFEST_PATH",
+        raising=False,
+    )
+    monkeypatch.delenv(
+        "ANOMALYOPS_DATABASE_URL",
+        raising=False,
+    )
+
+    settings = load_api_settings()
+
+    assert settings.retrieval_backend == "manifest"
+
+
+def test_load_api_settings_reads_manifest_path(monkeypatch):
+    monkeypatch.setenv(
+        "ANOMALYOPS_MANIFEST_PATH",
+        "outputs/chunks.json",
+    )
+
+    settings = load_api_settings()
+
+    assert settings.manifest_path == Path("outputs/chunks.json")
+
+
+def test_load_api_settings_reads_pgvector_backend(monkeypatch):
+    monkeypatch.setenv(
+        "ANOMALYOPS_RETRIEVAL_BACKEND",
+        "pgvector",
+    )
+
+    settings = load_api_settings()
+
+    assert settings.retrieval_backend == "pgvector"
+
+
+def test_load_api_settings_reads_database_url(monkeypatch):
+    database_url = (
+        "postgresql+psycopg://"
+        "anomalyops:anomalyops@localhost:5432/anomalyops"
+    )
+
+    monkeypatch.setenv(
+        "ANOMALYOPS_DATABASE_URL",
+        database_url,
+    )
+
+    settings = load_api_settings()
+
+    assert settings.database_url == database_url

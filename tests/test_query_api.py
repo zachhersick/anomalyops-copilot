@@ -1,11 +1,14 @@
 import pytest
 
 from fastapi.testclient import TestClient
+from unittest.mock import MagicMock, patch
 
 from copilot.api.app import create_app
 from copilot.api.settings import ApiSettings
 from copilot.ingestion.manifest import write_chunk_manifest
 from copilot.schemas.chunk import SourceChunk
+from copilot.api.errors import DatabaseNotConfiguredError
+from copilot.schemas.query import QueryResponse
 
 
 def test_query_endpoint_returns_grounded_answer(tmp_path):
@@ -285,6 +288,170 @@ def test_api_manifest_file_invalid(tmp_path):
         
     assert response.status_code == 500
     assert response.json() == {"detail": "Manifest file is invalid."}
+    
+    
+def test_query_endpoint_passes_full_settings_to_query_service():
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url="postgresql+psycopg://test",
+    )
+    expected_response = QueryResponse(
+        answer="Grounded answer",
+        confidence=0.9,
+        citations=[],
+        refusal_reason=None,
+        context=None,
+        context_snippets=[],
+    )
+
+    test_app = create_app(settings=settings)
+
+    with patch(
+        "copilot.api.app.query_service",
+        return_value=expected_response,
+    ) as query_service:
+        with TestClient(test_app) as client:
+            response = client.post(
+                "/query",
+                json={
+                    "query": "prediction api",
+                    "top_k": 3,
+                    "min_score": 0.0,
+                    "show_context": False,
+                },
+            )
+
+    assert response.status_code == 200
+
+    query_service.assert_called_once()
+
+    called_settings, called_request = query_service.call_args.args
+
+    assert called_settings is settings
+    assert called_request.query == "prediction api"
+    assert called_request.top_k == 3
+    
+    
+def test_query_endpoint_maps_missing_database_url_to_500():
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url=None,
+    )
+    test_app = create_app(settings=settings)
+
+    with patch(
+        "copilot.api.app.query_service",
+        side_effect=DatabaseNotConfiguredError(
+            "Database URL is not configured."
+        ),
+    ):
+        with TestClient(test_app) as client:
+            response = client.post(
+                "/query",
+                json={
+                    "query": "prediction api",
+                    "top_k": 3,
+                    "min_score": 0.0,
+                    "show_context": False,
+                },
+            )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "Database URL is not configured."
+    }
+    
+    
+def test_pgvector_app_creates_engine_once_and_reuses_session_factory():
+    engine = MagicMock()
+    session_factory = MagicMock()
+
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url="postgresql+psycopg://test",
+    )
+    expected_response = QueryResponse(
+        answer="Grounded answer",
+        confidence=0.9,
+        citations=[],
+        refusal_reason=None,
+        context=None,
+        context_snippets=[],
+    )
+
+    payload = {
+        "query": "prediction api",
+        "top_k": 3,
+        "min_score": 0.0,
+        "show_context": False,
+    }
+
+    with (
+        patch(
+            "copilot.api.app.create_engine_from_url",
+            return_value=engine,
+        ) as create_engine_from_url,
+        patch(
+            "copilot.api.app.create_session_factory",
+            return_value=session_factory,
+        ) as create_session_factory,
+        patch(
+            "copilot.api.app.query_service",
+            return_value=expected_response,
+        ) as query_service,
+    ):
+        test_app = create_app(settings=settings)
+
+        with TestClient(test_app) as client:
+            first_response = client.post("/query", json=payload)
+            second_response = client.post("/query", json=payload)
+
+    assert first_response.status_code == 200
+    assert second_response.status_code == 200
+
+    create_engine_from_url.assert_called_once_with(
+        "postgresql+psycopg://test"
+    )
+    create_session_factory.assert_called_once_with(engine)
+
+    assert query_service.call_count == 2
+
+    for query_call in query_service.call_args_list:
+        called_settings, called_request = query_call.args
+
+        assert called_settings is settings
+        assert called_request.query == "prediction api"
+        assert (
+            query_call.kwargs["session_factory"]
+            is session_factory
+        )
+        
+        
+def test_pgvector_app_disposes_engine_on_shutdown():
+    engine = MagicMock()
+    session_factory = MagicMock()
+
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url="postgresql+psycopg://test",
+    )
+
+    with (
+        patch(
+            "copilot.api.app.create_engine_from_url",
+            return_value=engine,
+        ),
+        patch(
+            "copilot.api.app.create_session_factory",
+            return_value=session_factory,
+        ),
+    ):
+        test_app = create_app(settings=settings)
+
+        with TestClient(test_app):
+            pass
+
+    engine.dispose.assert_called_once_with()
     
     
 def post_query(payload: dict, tmp_path):

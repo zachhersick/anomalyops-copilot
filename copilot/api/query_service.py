@@ -1,12 +1,16 @@
-from pathlib import Path
 from json import JSONDecodeError
 from pydantic import ValidationError
+from sqlalchemy.orm import Session, sessionmaker
 
 from copilot.schemas.query import QueryRequest, QueryResponse, ContextSnippet
 from copilot.answering.grounded import build_grounded_answer
 from copilot.ingestion.manifest import load_chunk_manifest
 from copilot.retrieval.search import retrieve_relevant_chunks
 from copilot.retrieval.context import format_retrieval_context
+from copilot.retrieval.pgvector import retrieve_relevant_chunks_from_pgvector
+from copilot.api.settings import ApiSettings
+from copilot.schemas.retrieval import ScoredChunk
+from copilot.api.errors import DatabaseNotConfiguredError
 from copilot.api.errors import (
     ManifestNotConfiguredError,
     ManifestFileNotFoundError,
@@ -14,23 +18,17 @@ from copilot.api.errors import (
 )
 
 
-def query_service(manifest_path: Path | None, query_request: QueryRequest) -> QueryResponse:
-    if manifest_path is None:
-        raise ManifestNotConfiguredError("Manifest path is not configured.")
-    
-    if not manifest_path.is_file():
-        raise ManifestFileNotFoundError(f"{manifest_path} does not exist.")
-    
-    try:
-        source_chunks = load_chunk_manifest(manifest_path)
-    except (JSONDecodeError, ValidationError) as exc:
-        raise InvalidManifestError("Manifest file is invalid.") from exc
-        
-    selected_chunks = retrieve_relevant_chunks(
-        query=query_request.query,
-        chunks=source_chunks,
-        top_k=query_request.top_k,
+def query_service(
+    settings: ApiSettings,
+    query_request: QueryRequest,
+    session_factory: sessionmaker[Session] | None = None,
+) -> QueryResponse:
+    selected_chunks = retrieve_chunks_for_query(
+        settings,
+        query_request,
+        session_factory=session_factory
     )
+    
     grounded_answer = build_grounded_answer(
         query=query_request.query,
         scored_chunks=selected_chunks,
@@ -64,3 +62,46 @@ def query_service(manifest_path: Path | None, query_request: QueryRequest) -> Qu
         context=context,
         context_snippets=context_snippets,
     )
+    
+    
+def retrieve_chunks_for_query(
+    settings: ApiSettings,
+    query_request: QueryRequest,
+    session_factory: sessionmaker[Session] | None = None,
+) -> list[ScoredChunk]:
+    retrieval_backend = settings.retrieval_backend
+    
+    if retrieval_backend == "manifest":
+        if settings.manifest_path is None:
+            raise ManifestNotConfiguredError("Manifest path is not configured.")
+        
+        if not settings.manifest_path.is_file():
+            raise ManifestFileNotFoundError(f"{settings.manifest_path} does not exist.")
+        
+        try:
+            source_chunks = load_chunk_manifest(settings.manifest_path)
+        except (JSONDecodeError, ValidationError) as exc:
+            raise InvalidManifestError("Manifest file is invalid.") from exc
+            
+        return retrieve_relevant_chunks(
+            query=query_request.query,
+            chunks=source_chunks,
+            top_k=query_request.top_k,
+        )
+    
+    if settings.database_url is None:
+        raise DatabaseNotConfiguredError(
+            "Database URL is not configured."
+        )
+        
+    if session_factory is None:
+        raise RuntimeError(
+            "Database session factory is not configured."
+        )
+        
+    with session_factory() as session:
+        return retrieve_relevant_chunks_from_pgvector(
+            session=session,
+            query=query_request.query,
+            top_k=query_request.top_k
+        )
