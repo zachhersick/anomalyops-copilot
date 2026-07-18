@@ -1,5 +1,6 @@
 from json import JSONDecodeError
 from pydantic import ValidationError
+from sqlalchemy.orm import Session, sessionmaker
 
 from copilot.schemas.query import QueryRequest, QueryResponse, ContextSnippet
 from copilot.answering.grounded import build_grounded_answer
@@ -15,14 +16,18 @@ from copilot.api.errors import (
     ManifestFileNotFoundError,
     InvalidManifestError
 )
-from copilot.storage.database import (
-    create_engine_from_url,
-    create_session_factory,
-)
 
 
-def query_service(settings: ApiSettings, query_request: QueryRequest) -> QueryResponse:
-    selected_chunks = retrieve_chunks_for_query(settings, query_request)
+def query_service(
+    settings: ApiSettings,
+    query_request: QueryRequest,
+    session_factory: sessionmaker[Session] | None = None,
+) -> QueryResponse:
+    selected_chunks = retrieve_chunks_for_query(
+        settings,
+        query_request,
+        session_factory=session_factory
+    )
     
     grounded_answer = build_grounded_answer(
         query=query_request.query,
@@ -62,6 +67,7 @@ def query_service(settings: ApiSettings, query_request: QueryRequest) -> QueryRe
 def retrieve_chunks_for_query(
     settings: ApiSettings,
     query_request: QueryRequest,
+    session_factory: sessionmaker[Session] | None = None,
 ) -> list[ScoredChunk]:
     retrieval_backend = settings.retrieval_backend
     
@@ -88,12 +94,12 @@ def retrieve_chunks_for_query(
             "Database URL is not configured."
         )
         
-    engine = create_engine_from_url(
-        settings.database_url
-    )
-    SessionFactory = create_session_factory(engine)
+    if session_factory is None:
+        raise RuntimeError(
+            "Database session factory is not configured."
+        )
         
-    with SessionFactory() as session:
+    with session_factory() as session:
         return retrieve_relevant_chunks_from_pgvector(
             session=session,
             query=query_request.query,

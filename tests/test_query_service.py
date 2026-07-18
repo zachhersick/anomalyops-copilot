@@ -236,8 +236,7 @@ def test_retrieve_chunks_for_query_uses_manifest_backend(tmp_path):
     )
     
     
-def test_retrieve_chunks_for_query_uses_pgvector_backend():
-    engine = MagicMock()
+def test_retrieve_chunks_for_query_uses_shared_pgvector_session_factory():
     session = MagicMock()
     session_factory = MagicMock()
     session_factory.return_value.__enter__.return_value = session
@@ -255,7 +254,6 @@ def test_retrieve_chunks_for_query_uses_pgvector_backend():
 
     settings = ApiSettings(
         retrieval_backend="pgvector",
-        manifest_path=None,
         database_url="postgresql+psycopg://test",
     )
     query_request = make_query_request(
@@ -263,31 +261,19 @@ def test_retrieve_chunks_for_query_uses_pgvector_backend():
         top_k=4,
     )
 
-    with (
-        patch(
-            "copilot.api.query_service.create_engine_from_url",
-            return_value=engine,
-        ) as create_engine_from_url,
-        patch(
-            "copilot.api.query_service.create_session_factory",
-            return_value=session_factory,
-        ) as create_session_factory,
-        patch(
-            "copilot.api.query_service.retrieve_relevant_chunks_from_pgvector",
-            return_value=expected_results,
-        ) as retrieve_pgvector,
-    ):
+    with patch(
+        "copilot.api.query_service.retrieve_relevant_chunks_from_pgvector",
+        return_value=expected_results,
+    ) as retrieve_pgvector:
         results = retrieve_chunks_for_query(
             settings,
             query_request,
+            session_factory=session_factory,
         )
 
     assert results == expected_results
 
-    create_engine_from_url.assert_called_once_with(
-        "postgresql+psycopg://test"
-    )
-    create_session_factory.assert_called_once_with(engine)
+    session_factory.assert_called_once_with()
     retrieve_pgvector.assert_called_once_with(
         session=session,
         query="prediction api",
@@ -298,7 +284,6 @@ def test_retrieve_chunks_for_query_uses_pgvector_backend():
 def test_pgvector_backend_requires_database_url():
     settings = ApiSettings(
         retrieval_backend="pgvector",
-        manifest_path=None,
         database_url=None,
     )
 
@@ -309,6 +294,7 @@ def test_pgvector_backend_requires_database_url():
         retrieve_chunks_for_query(
             settings,
             make_query_request(query="prediction api"),
+            session_factory=None,
         )
         
         
@@ -363,6 +349,59 @@ def test_query_service_returns_same_response_for_both_backends():
     assert len(manifest_response.citations) == 1
     assert manifest_response.context is not None
     assert len(manifest_response.context_snippets) == 1
+    
+    
+def test_pgvector_backend_requires_session_factory():
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url="postgresql+psycopg://test",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Database session factory is not configured.",
+    ):
+        retrieve_chunks_for_query(
+            settings,
+            make_query_request(query="prediction api"),
+            session_factory=None,
+        )
+        
+        
+def test_query_service_passes_session_factory_to_retrieval():
+    session_factory = MagicMock()
+    scored_chunks = [
+        ScoredChunk(
+            chunk=make_chunk(
+                "chunk-1",
+                "The prediction API exposes a POST /predict endpoint.",
+                source_path="api.py",
+            ),
+            score=0.9,
+        ),
+    ]
+
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url="postgresql+psycopg://test",
+    )
+    query_request = make_query_request(query="prediction api")
+
+    with patch(
+        "copilot.api.query_service.retrieve_chunks_for_query",
+        return_value=scored_chunks,
+    ) as retrieve_chunks:
+        query_service(
+            settings,
+            query_request,
+            session_factory=session_factory,
+        )
+
+    retrieve_chunks.assert_called_once_with(
+        settings,
+        query_request,
+        session_factory=session_factory,
+    )
     
     
 def make_query_request(
