@@ -15,6 +15,7 @@ class ApiSettings(BaseModel):
     retrieval_backend: Literal["manifest", "pgvector"] = "manifest"
     manifest_path: Path | None = None
     database_url: str | None = None
+    anomaly_api_base_url: str | None = None
     
     
 def load_api_settings() -> ApiSettings:
@@ -45,9 +46,12 @@ def load_api_settings() -> ApiSettings:
         if manifest_path_value is not None
         else None
     )
+    
+    api_base_url = os.getenv("ANOMALYOPS_ANOMALY_API_BASE_URL")
 
     return ApiSettings(
         retrieval_backend=retrieval_backend,
         manifest_path=manifest_path,
         database_url=database_url,
+        anomaly_api_base_url=api_base_url,
     )

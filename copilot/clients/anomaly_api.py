@@ -1,6 +1,21 @@
+import json
+
 import httpx
+from pydantic import ValidationError
 
 from copilot.schemas.anomaly import LatestRun, RunSummary, AlertEvent, RowAlert
+
+
+class AnomalyApiError(Exception):
+    pass
+
+
+class AnomalyResourceNotFoundError(AnomalyApiError):
+    pass
+
+
+class InvalidAnomalyApiResponseError(AnomalyApiError):
+    pass
 
 
 class AnomalyApiClient:
@@ -52,20 +67,50 @@ class AnomalyApiClient:
             raise AnomalyApiError(
                 f"Anomaly API request failed with status {response.status_code}."
             ) from exc
-        
-        
-    def get_latest_run(self) -> LatestRun:
+            
+    
+    def _decode_response_json(
+        self,
+        response: httpx.Response
+    ) -> object:
         try:
-            response = self._client.get("/runs/latest")
-            self._raise_for_status(response)
-            payload = response.json()
+            return response.json()
+        except json.JSONDecodeError as exc:
+            raise InvalidAnomalyApiResponseError(
+                "Anomaly API returned invalid JSON."
+            ) from exc
             
-            validated_model = LatestRun.model_validate(payload)
-            
-            return validated_model
+        
+    def _get(
+        self,
+        path: str,
+        params: dict[str, str | int] | None = None,
+    ) -> httpx.Response:
+        try:
+            response = self._client.get(
+                path,
+                params=params,
+            )
         except httpx.RequestError as exc:
             raise AnomalyApiError(
                 "Could not connect to the anomaly API."
+            ) from exc
+            
+        self._raise_for_status(response)
+        
+        return response
+        
+        
+    def get_latest_run(self) -> LatestRun:
+        response = self._get("/runs/latest")
+        
+        payload = self._decode_response_json(response)
+        
+        try:
+            return LatestRun.model_validate(payload)
+        except ValidationError as exc:
+            raise InvalidAnomalyApiResponseError(
+                "Anomaly API response did not match the expected schema."
             ) from exc
     
     
@@ -73,13 +118,16 @@ class AnomalyApiClient:
         if run_id <= 0:
             raise ValueError("run_id must be positive.")
         
-        response = self._client.get(f"/runs/{run_id}/summary")
-        self._raise_for_status(response)
-        payload = response.json()
+        response = self._get(f"/runs/{run_id}/summary")
         
-        validated_model = RunSummary.model_validate(payload)
-        
-        return validated_model
+        payload = self._decode_response_json(response)
+            
+        try:
+            return RunSummary.model_validate(payload)
+        except ValidationError as exc:
+            raise InvalidAnomalyApiResponseError(
+                "Anomaly API response did not match the expected schema."
+            ) from exc
     
     
     def list_alert_events(
@@ -112,19 +160,28 @@ class AnomalyApiClient:
         if anomaly_type is not None:
             params["anomaly_type"] = anomaly_type
         
-        response = self._client.get(
+        response = self._get(
             f"/runs/{run_id}/events",
             params=params,
         )
-        self._raise_for_status(response)
-        payload = response.json()
         
-        alert_events = []
-        for json_dict in payload:
-            validated_model = AlertEvent.model_validate(json_dict)
-            alert_events.append(validated_model)
+        payload = self._decode_response_json(response)
             
-        return alert_events
+        try:
+            if not isinstance(payload, list):
+                raise InvalidAnomalyApiResponseError(
+                    "Anomaly API response did not match the expected schema."
+                )
+            alert_events = []
+            for json_dict in payload:
+                validated_model = AlertEvent.model_validate(json_dict)
+                alert_events.append(validated_model)
+                
+            return alert_events
+        except ValidationError as exc:
+            raise InvalidAnomalyApiResponseError(
+                "Anomaly API response did not match the expected schema."
+            ) from exc
     
     
     def get_event_alerts(
@@ -137,27 +194,24 @@ class AnomalyApiClient:
         if event_id <= 0:
             raise ValueError("event_id must be positive.")
         
-        response = self._client.get(
+        response = self._get(
             f"/runs/{run_id}/events/{event_id}/alerts",
         )
-        self._raise_for_status(response)
-        payload = response.json()
         
-        event_alerts = []
-        for json_dict in payload:
-            validated_model = RowAlert.model_validate(json_dict)
-            event_alerts.append(validated_model)
+        payload = self._decode_response_json(response)
             
-        return event_alerts
-    
-    
-class AnomalyApiError(Exception):
-    pass
-
-
-class AnomalyResourceNotFoundError(AnomalyApiError):
-    pass
-
-
-class InvalidAnomalyApiResponseError(AnomalyApiError):
-    pass
+        try:
+            if not isinstance(payload, list):
+                raise InvalidAnomalyApiResponseError(
+                    "Anomaly API response did not match the expected schema."
+                )
+            event_alerts = []
+            for json_dict in payload:
+                validated_model = RowAlert.model_validate(json_dict)
+                event_alerts.append(validated_model)
+                
+            return event_alerts
+        except ValidationError as exc:
+            raise InvalidAnomalyApiResponseError(
+                "Anomaly API response did not match the expected schema."
+            ) from exc
