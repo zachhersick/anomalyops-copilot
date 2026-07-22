@@ -118,3 +118,27 @@ def test_load_api_settings_reads_database_url(monkeypatch):
     settings = load_api_settings()
 
     assert settings.database_url == database_url
+    
+    
+def test_load_api_settings_reads_anomaly_api_base_url(monkeypatch):
+    anomaly_api_base_url = "http://anomaly-api.test"
+
+    monkeypatch.setenv(
+        "ANOMALYOPS_ANOMALY_API_BASE_URL",
+        anomaly_api_base_url,
+    )
+
+    settings = load_api_settings()
+
+    assert settings.anomaly_api_base_url == anomaly_api_base_url
+
+
+def test_load_api_settings_defaults_anomaly_api_base_url_to_none(monkeypatch):
+    monkeypatch.delenv(
+        "ANOMALYOPS_ANOMALY_API_BASE_URL",
+        raising=False,
+    )
+
+    settings = load_api_settings()
+
+    assert settings.anomaly_api_base_url is None
