@@ -119,12 +119,8 @@ def configure_summary(
 
 
 def configure_empty_event_results(tools: Mock) -> None:
-    tools.list_alert_events.return_value = ListAlertEventsOutput(
-        events=[]
-    )
-    tools.get_event_alerts.return_value = GetEventAlertsOutput(
-        alerts=[]
-    )
+    tools.list_alert_events.return_value = ListAlertEventsOutput(events=[])
+    tools.get_event_alerts.return_value = GetEventAlertsOutput(alerts=[])
 
 
 def test_explicit_run_id_skips_latest_run_lookup():
@@ -146,9 +142,7 @@ def test_explicit_run_id_skips_latest_run_lookup():
 def test_missing_run_id_resolves_latest_run():
     tools = Mock(spec=AnomalyOperationalTools)
 
-    tools.get_latest_run.return_value = GetLatestRunOutput(
-        run=LatestRun(run_id=42)
-    )
+    tools.get_latest_run.return_value = GetLatestRunOutput(run=LatestRun(run_id=42))
     configure_summary(tools, total_alert_events=0)
 
     service = TriageService(tools)
@@ -233,9 +227,7 @@ def test_events_are_sorted_by_priority():
         ListAlertEventsOutput(events=critical_events),
         ListAlertEventsOutput(events=warning_events),
     ]
-    tools.get_event_alerts.return_value = GetEventAlertsOutput(
-        alerts=[]
-    )
+    tools.get_event_alerts.return_value = GetEventAlertsOutput(alerts=[])
 
     service = TriageService(tools)
 
@@ -246,10 +238,7 @@ def test_events_are_sorted_by_priority():
         )
     )
 
-    ordered_event_ids = [
-        item.event.event_id
-        for item in result.evidence
-    ]
+    ordered_event_ids = [item.event.event_id for item in result.evidence]
 
     assert ordered_event_ids == [2, 3, 4, 1, 5]
 
@@ -272,9 +261,7 @@ def test_selected_events_are_limited_to_max_events():
             ]
         ),
     ]
-    tools.get_event_alerts.return_value = GetEventAlertsOutput(
-        alerts=[]
-    )
+    tools.get_event_alerts.return_value = GetEventAlertsOutput(alerts=[])
 
     service = TriageService(tools)
 
@@ -307,9 +294,7 @@ def test_fetches_alerts_for_every_selected_event():
             ]
         ),
     ]
-    tools.get_event_alerts.return_value = GetEventAlertsOutput(
-        alerts=[]
-    )
+    tools.get_event_alerts.return_value = GetEventAlertsOutput(alerts=[])
 
     service = TriageService(tools)
 
@@ -322,20 +307,11 @@ def test_fetches_alerts_for_every_selected_event():
 
     assert tools.get_event_alerts.call_count == 3
 
-    alert_inputs = [
-        call.args[0]
-        for call in tools.get_event_alerts.call_args_list
-    ]
+    alert_inputs = [call.args[0] for call in tools.get_event_alerts.call_args_list]
 
-    assert [
-        tool_input.event_id
-        for tool_input in alert_inputs
-    ] == [10, 11, 12]
+    assert [tool_input.event_id for tool_input in alert_inputs] == [10, 11, 12]
 
-    assert all(
-        tool_input.run_id == 42
-        for tool_input in alert_inputs
-    )
+    assert all(tool_input.run_id == 42 for tool_input in alert_inputs)
 
 
 def test_row_alerts_are_sorted_by_step_then_alert_id():
@@ -360,14 +336,9 @@ def test_row_alerts_are_sorted_by_step_then_alert_id():
 
     service = TriageService(tools)
 
-    result = service.triage(
-        TriageRequest(run_id=42)
-    )
+    result = service.triage(TriageRequest(run_id=42))
 
-    ordered_alerts = [
-        (alert.step, alert.alert_id)
-        for alert in result.evidence[0].alerts
-    ]
+    ordered_alerts = [(alert.step, alert.alert_id) for alert in result.evidence[0].alerts]
 
     assert ordered_alerts == [
         (101, 4),
@@ -392,20 +363,13 @@ def test_findings_reference_existing_evidence():
             ]
         ),
     ]
-    tools.get_event_alerts.return_value = GetEventAlertsOutput(
-        alerts=[]
-    )
+    tools.get_event_alerts.return_value = GetEventAlertsOutput(alerts=[])
 
     service = TriageService(tools)
 
-    result = service.triage(
-        TriageRequest(run_id=42)
-    )
+    result = service.triage(TriageRequest(run_id=42))
 
-    evidence_ids = {
-        item.evidence_id
-        for item in result.evidence
-    }
+    evidence_ids = {item.evidence_id for item in result.evidence}
 
     assert evidence_ids == {
         "event-7",
@@ -416,10 +380,7 @@ def test_findings_reference_existing_evidence():
         assert finding.evidence_ids
         assert set(finding.evidence_ids).issubset(evidence_ids)
 
-    assert [
-        finding.finding_id
-        for finding in result.findings
-    ] == [
+    assert [finding.finding_id for finding in result.findings] == [
         "finding-7",
         "finding-8",
     ]
@@ -442,15 +403,11 @@ def test_report_contains_deterministic_finding_summary():
         ListAlertEventsOutput(events=[event]),
         ListAlertEventsOutput(events=[]),
     ]
-    tools.get_event_alerts.return_value = GetEventAlertsOutput(
-        alerts=[]
-    )
+    tools.get_event_alerts.return_value = GetEventAlertsOutput(alerts=[])
 
     service = TriageService(tools)
 
-    result = service.triage(
-        TriageRequest(run_id=42)
-    )
+    result = service.triage(TriageRequest(run_id=42))
 
     finding = result.findings[0]
 
@@ -459,47 +416,32 @@ def test_report_contains_deterministic_finding_summary():
     assert finding.machine_id == 3
     assert finding.sensor == "temperature"
     assert finding.anomaly_type == "spike"
-    assert finding.summary == (
-        "Critical spike event on machine 3 "
-        "temperature sensor."
-    )
+    assert finding.summary == ("Critical spike event on machine 3 temperature sensor.")
     assert finding.evidence_ids == ["event-7"]
 
 
 def test_missing_run_maps_to_triage_run_not_found_error():
     tools = Mock(spec=AnomalyOperationalTools)
-    original_error = OperationalResourceNotFoundError(
-        "Run was not found."
-    )
+    original_error = OperationalResourceNotFoundError("Run was not found.")
     tools.get_run_summary.side_effect = original_error
 
     service = TriageService(tools)
 
-    with pytest.raises(
-        TriageRunNotFoundError
-    ) as exc_info:
-        service.triage(
-            TriageRequest(run_id=42)
-        )
+    with pytest.raises(TriageRunNotFoundError) as exc_info:
+        service.triage(TriageRequest(run_id=42))
 
     assert exc_info.value.__cause__ is original_error
 
 
 def test_operational_failure_maps_to_triage_service_error():
     tools = Mock(spec=AnomalyOperationalTools)
-    original_error = OperationalToolError(
-        "Operational API failed."
-    )
+    original_error = OperationalToolError("Operational API failed.")
     tools.get_run_summary.side_effect = original_error
 
     service = TriageService(tools)
 
-    with pytest.raises(
-        TriageServiceError
-    ) as exc_info:
-        service.triage(
-            TriageRequest(run_id=42)
-        )
+    with pytest.raises(TriageServiceError) as exc_info:
+        service.triage(TriageRequest(run_id=42))
 
     assert exc_info.value.__cause__ is original_error
 

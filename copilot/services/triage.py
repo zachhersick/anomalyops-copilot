@@ -26,15 +26,12 @@ class TriageRunNotFoundError(TriageServiceError):
 
 
 class TriageService:
-    
-    
     def __init__(
         self,
         tools: AnomalyOperationalTools,
     ) -> None:
         self._tool = tools
-        
-        
+
     def triage(
         self,
         request: TriageRequest,
@@ -45,14 +42,10 @@ class TriageService:
                 run_id = result.run.run_id
             else:
                 run_id = request.run_id
-            
-            summary_result = self._tool.get_run_summary(
-                GetRunSummaryInput(
-                    run_id=run_id
-                )
-            )
+
+            summary_result = self._tool.get_run_summary(GetRunSummaryInput(run_id=run_id))
             summary = summary_result.summary
-            
+
             if summary.total_alert_events == 0:
                 return TriageReport(
                     run_id=run_id,
@@ -61,7 +54,7 @@ class TriageService:
                     findings=[],
                     evidence=[],
                 )
-            
+
             critical_result = self._tool.list_alert_events(
                 ListAlertEventsInput(
                     run_id=run_id,
@@ -70,7 +63,7 @@ class TriageService:
                     offset=0,
                 )
             )
-            
+
             warning_result = self._tool.list_alert_events(
                 ListAlertEventsInput(
                     run_id=run_id,
@@ -79,14 +72,14 @@ class TriageService:
                     offset=0,
                 )
             )
-            
+
             events = critical_result.events + warning_result.events
-            
+
             severity_rank = {
                 "critical": 0,
                 "warning": 1,
             }
-            
+
             selected_events = sorted(
                 events,
                 key=lambda event: (
@@ -95,18 +88,14 @@ class TriageService:
                         2,
                     ),
                     event.max_anomaly_score is None,
-                    -(
-                        event.max_anomaly_score
-                        if event.max_anomaly_score is not None
-                        else 0.0
-                    ),
+                    -(event.max_anomaly_score if event.max_anomaly_score is not None else 0.0),
                     event.event_id,
                 ),
-            )[:request.max_events]
-            
+            )[: request.max_events]
+
             findings: list[TriageFinding] = []
             evidence: list[TriageEvidence] = []
-            
+
             for event in selected_events:
                 alerts_result = self._tool.get_event_alerts(
                     GetEventAlertsInput(
@@ -114,7 +103,7 @@ class TriageService:
                         event_id=event.event_id,
                     )
                 )
-                
+
                 sorted_alerts = sorted(
                     alerts_result.alerts,
                     key=lambda alert: (
@@ -122,9 +111,9 @@ class TriageService:
                         alert.alert_id,
                     ),
                 )
-                
+
                 evidence_id = f"event-{event.event_id}"
-                
+
                 evidence.append(
                     TriageEvidence(
                         evidence_id=evidence_id,
@@ -132,10 +121,10 @@ class TriageService:
                         alerts=sorted_alerts,
                     )
                 )
-                
+
                 severity = event.max_severity or "unknown"
                 anomaly_type = event.anomaly_type or "alert"
-                
+
                 findings.append(
                     TriageFinding(
                         finding_id=f"finding-{event.event_id}",
@@ -152,7 +141,7 @@ class TriageService:
                         evidence_ids=[evidence_id],
                     )
                 )
-                
+
             return TriageReport(
                 run_id=run_id,
                 status="completed",
@@ -160,11 +149,9 @@ class TriageService:
                 findings=findings,
                 evidence=evidence,
             )
-            
+
         except OperationalResourceNotFoundError as exc:
-            raise TriageRunNotFoundError(
-                "The requested run was not found."
-            ) from exc
+            raise TriageRunNotFoundError("The requested run was not found.") from exc
         except OperationalToolError as exc:
             raise TriageServiceError(
                 "Triage failed while retrieving operational evidence."
