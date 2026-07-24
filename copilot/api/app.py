@@ -1,3 +1,5 @@
+import httpx
+
 from fastapi import FastAPI, HTTPException, Request
 
 from copilot.schemas.query import QueryRequest, QueryResponse
@@ -13,9 +15,23 @@ from copilot.api.errors import (
     InvalidManifestError,
     DatabaseNotConfiguredError,
 )
+from copilot.schemas.triage import (
+    TriageRequest,
+    TriageReport,
+)
+from copilot.services.triage import (
+    TriageService,
+    TriageRunNotFoundError,
+    TriageServiceError,
+)
+from copilot.tools.anomaly import AnomalyOperationalTools
+from copilot.clients.anomaly_api import AnomalyApiClient
 
 
-def create_app(settings: ApiSettings | None = None) -> FastAPI:
+def create_app(
+    settings: ApiSettings | None = None,
+    anomaly_transport: httpx.BaseTransport | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="AnomalyOps-Copilot API",
         description="API RAG answers.",
@@ -27,15 +43,31 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
     app.state.settings = resolved_settings
     app.state.database_engine = None
     app.state.session_factory = None
+    app.state.anomaly_client = None
+    app.state.anomaly_tools = None
+    app.state.triage_service = None
     
     if (
         resolved_settings.retrieval_backend == "pgvector"
-        and settings.database_url is not None
+        and resolved_settings.database_url is not None
     ):
         engine = create_engine_from_url(resolved_settings.database_url)
         
         app.state.database_engine = engine
         app.state.session_factory = create_session_factory(engine)
+        
+    if resolved_settings.anomaly_api_base_url is not None:
+        anomaly_client = AnomalyApiClient(
+            resolved_settings.anomaly_api_base_url,
+            transport=anomaly_transport,
+        )
+        anomaly_tools = AnomalyOperationalTools(anomaly_client)
+        
+        app.state.anomaly_client = anomaly_client
+        app.state.anomaly_tools = anomaly_tools
+        app.state.triage_service = TriageService(
+            app.state.anomaly_tools
+        )
         
 
     @app.get("/health")
@@ -77,9 +109,39 @@ def create_app(settings: ApiSettings | None = None) -> FastAPI:
         return query_response
     
     
+    @app.post("/triage", response_model=TriageReport)
+    def post_triage_report(request: Request, triage_request: TriageRequest) -> TriageReport:
+        service = request.app.state.triage_service
+        
+        if service is None:
+            raise HTTPException(
+                status_code=500,
+                detail="Anomaly API base URL is not configured."
+            )
+            
+        try:
+            report = service.triage(request=triage_request)
+        except TriageRunNotFoundError as exc:
+            raise HTTPException(
+                status_code=404,
+                detail="The requested run was not found.",
+            ) from exc
+        except TriageServiceError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Anomaly API request failed.",
+            ) from exc
+            
+        return report
+    
+    
     @app.on_event("shutdown")
     def shutdown_database_engine() -> None:
         engine = app.state.database_engine
+        client = app.state.anomaly_client
+        
+        if client is not None:
+            client.close()
         
         if engine is not None:
             engine.dispose()
