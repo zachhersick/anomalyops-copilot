@@ -1,3 +1,5 @@
+import pytest
+
 from pathlib import Path
 
 from copilot.api.app import create_app
@@ -142,3 +144,96 @@ def test_load_api_settings_defaults_anomaly_api_base_url_to_none(monkeypatch):
     settings = load_api_settings()
 
     assert settings.anomaly_api_base_url is None
+    
+
+def test_api_settings_has_deterministic_ai_defaults():
+    settings = ApiSettings()
+
+    assert settings.ai_provider == "deterministic"
+    assert settings.embedding_model is None
+    assert settings.grounded_answer_model is None
+    assert settings.triage_model is None
+    assert settings.openai_api_key is None
+
+
+def test_load_api_settings_uses_deterministic_ai_defaults(
+    monkeypatch,
+):
+    monkeypatch.delenv("ANOMALYOPS_AI_PROVIDER", raising=False)
+    monkeypatch.delenv("ANOMALYOPS_EMBEDDING_MODEL", raising=False)
+    monkeypatch.delenv(
+        "ANOMALYOPS_GROUNDED_ANSWER_MODEL",
+        raising=False,
+    )
+    monkeypatch.delenv("ANOMALYOPS_TRIAGE_MODEL", raising=False)
+    monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+
+    settings = load_api_settings()
+
+    assert settings.ai_provider == "deterministic"
+    assert settings.embedding_model is None
+    assert settings.grounded_answer_model is None
+    assert settings.triage_model is None
+    assert settings.openai_api_key is None
+
+
+def test_load_api_settings_reads_ai_configuration(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "ANOMALYOPS_AI_PROVIDER",
+        "openai",
+    )
+    monkeypatch.setenv(
+        "ANOMALYOPS_EMBEDDING_MODEL",
+        "text-embedding-3-small",
+    )
+    monkeypatch.setenv(
+        "ANOMALYOPS_GROUNDED_ANSWER_MODEL",
+        "grounded-answer-model",
+    )
+    monkeypatch.setenv(
+        "ANOMALYOPS_TRIAGE_MODEL",
+        "triage-model",
+    )
+    monkeypatch.setenv(
+        "OPENAI_API_KEY",
+        "test-api-key",
+    )
+
+    settings = load_api_settings()
+
+    assert settings.ai_provider == "openai"
+    assert settings.embedding_model == "text-embedding-3-small"
+    assert (
+        settings.grounded_answer_model
+        == "grounded-answer-model"
+    )
+    assert settings.triage_model == "triage-model"
+    assert settings.openai_api_key == "test-api-key"
+
+
+def test_api_settings_accepts_openai_provider():
+    settings = ApiSettings(
+        ai_provider="openai",
+    )
+
+    assert settings.ai_provider == "openai"
+
+
+def test_load_api_settings_rejects_invalid_ai_provider(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "ANOMALYOPS_AI_PROVIDER",
+        "unsupported",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "ANOMALYOPS_AI_PROVIDER must be "
+            "'deterministic' or 'openai'"
+        ),
+    ):
+        load_api_settings()
