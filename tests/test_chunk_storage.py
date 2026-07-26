@@ -1,94 +1,276 @@
+from collections.abc import Sequence
+from unittest.mock import MagicMock, patch
+
 import pytest
-
 from sqlalchemy.dialects import postgresql
-from unittest.mock import MagicMock
 
-from copilot.storage.chunks import (
-    source_chunk_to_values,
-    build_source_chunk_upsert_statement,
-    store_source_chunks,
+from copilot.providers.errors import (
+    EmbeddingConfigurationError,
+    InvalidEmbeddingResponseError,
 )
 from copilot.schemas.chunk import SourceChunk
-from copilot.retrieval.embeddings import embed_text
+from copilot.storage.chunks import (
+    build_source_chunk_upsert_statement,
+    source_chunk_to_values,
+    store_source_chunks,
+)
 from copilot.storage.models import EMBEDDING_DIMENSIONS
 
 
-def test_source_chunk_to_values_every_chunk_field_is_copied():
-    values_dict = source_chunk_to_values(make_chunk("chunk-1", "text"))
-    
-    assert len(values_dict) == 10
-    assert values_dict["chunk_id"] == "chunk-1"
-    assert values_dict["source_id"] == "source.py"
-    assert values_dict["project_name"] == "test-project"
-    assert values_dict["source_type"] == "python"
-    assert values_dict["source_path"] == "source.py"
-    assert values_dict["chunk_index"] == 0
-    assert values_dict["content"] == "text"
-    assert values_dict["start_line"] == 1
-    assert values_dict["end_line"] == 2
-    assert values_dict["embedding"] == embed_text("text", EMBEDDING_DIMENSIONS)
-    
-    
-def test_source_chunk_to_values_embedding_contains_16_values():
-    values_dict = source_chunk_to_values(make_chunk("chunk-1", "text"))
-    
-    assert len(values_dict["embedding"]) == EMBEDDING_DIMENSIONS
-    
-    
+class FakeEmbeddingProvider:
+    provider_name = "fake"
+    model_name = "fake-embedding"
+
+    def __init__(
+        self,
+        embeddings: list[list[float]],
+        dimensions: int = EMBEDDING_DIMENSIONS,
+    ) -> None:
+        self.dimensions = dimensions
+        self.embeddings = embeddings
+        self.document_calls: list[list[str]] = []
+
+    def embed_query(
+        self,
+        text: str,
+    ) -> list[float]:
+        raise NotImplementedError
+
+    def embed_documents(
+        self,
+        texts: Sequence[str],
+    ) -> list[list[float]]:
+        self.document_calls.append(list(texts))
+        return [
+            list(embedding)
+            for embedding in self.embeddings
+        ]
+
+
+def make_embedding(
+    value: float = 0.25,
+) -> list[float]:
+    return [value] * EMBEDDING_DIMENSIONS
+
+
+def test_source_chunk_to_values_copies_fields_and_given_embedding():
+    embedding = make_embedding()
+
+    values = source_chunk_to_values(
+        make_chunk("chunk-1", "text"),
+        embedding,
+    )
+
+    assert len(values) == 10
+    assert values["chunk_id"] == "chunk-1"
+    assert values["source_id"] == "source.py"
+    assert values["project_name"] == "test-project"
+    assert values["source_type"] == "python"
+    assert values["source_path"] == "source.py"
+    assert values["chunk_index"] == 0
+    assert values["content"] == "text"
+    assert values["start_line"] == 1
+    assert values["end_line"] == 2
+    assert values["embedding"] == embedding
+
+
 def test_build_source_chunk_upsert_statement_uses_chunk_id_conflict():
     chunks = [
         make_chunk("chunk-1", "text"),
     ]
-    
-    statement = build_source_chunk_upsert_statement(chunks)
-    
+    embeddings = [
+        make_embedding(),
+    ]
+
+    statement = build_source_chunk_upsert_statement(
+        chunks,
+        embeddings,
+    )
+
     compiled_sql = str(
         statement.compile(
             dialect=postgresql.dialect(),
         )
     )
-    
+
     assert "ON CONFLICT (chunk_id) DO UPDATE" in compiled_sql
-    
-    
-def test_store_source_chunks_executes_commits_and_returns_count():
-    session = MagicMock()
-    
+
+
+def test_build_source_chunk_upsert_statement_rejects_count_mismatch():
     chunks = [
         make_chunk("chunk-1", "first"),
         make_chunk("chunk-2", "second"),
     ]
-    
-    stored_count = store_source_chunks(session, chunks)
-    
+    embeddings = [
+        make_embedding(),
+    ]
+
+    with pytest.raises(
+        InvalidEmbeddingResponseError,
+        match="Embedding count does not match chunk count.",
+    ):
+        build_source_chunk_upsert_statement(
+            chunks,
+            embeddings,
+        )
+
+
+def test_store_source_chunks_batches_documents_and_commits():
+    session = MagicMock()
+    statement = MagicMock()
+
+    chunks = [
+        make_chunk("chunk-1", "first"),
+        make_chunk("chunk-2", "second"),
+    ]
+    embeddings = [
+        make_embedding(0.25),
+        make_embedding(0.5),
+    ]
+    provider = FakeEmbeddingProvider(embeddings)
+
+    with patch(
+        "copilot.storage.chunks.build_source_chunk_upsert_statement",
+        return_value=statement,
+    ) as build_statement:
+        stored_count = store_source_chunks(
+            session=session,
+            chunks=chunks,
+            embedding_provider=provider,
+        )
+
     assert stored_count == 2
-    session.execute.assert_called_once()
+    assert provider.document_calls == [["first", "second"]]
+
+    build_statement.assert_called_once_with(
+        chunks,
+        embeddings,
+    )
+    session.execute.assert_called_once_with(statement)
     session.commit.assert_called_once_with()
     session.rollback.assert_not_called()
-    
-    
+
+
 def test_store_source_chunks_returns_zero_for_empty_chunks():
     session = MagicMock()
-    
-    stored_count = store_source_chunks(session, [])
-    
+    provider = FakeEmbeddingProvider([])
+
+    stored_count = store_source_chunks(
+        session=session,
+        chunks=[],
+        embedding_provider=provider,
+    )
+
     assert stored_count == 0
+    assert provider.document_calls == []
     session.execute.assert_not_called()
     session.commit.assert_not_called()
     session.rollback.assert_not_called()
-    
-    
-def test_store_source_chunks_rolls_back_and_reraises_on_failure():
+
+
+def test_store_source_chunks_rejects_provider_dimension_mismatch():
     session = MagicMock()
-    session.execute.side_effect = RuntimeError("database failed")
-    
+    provider = FakeEmbeddingProvider(
+        embeddings=[],
+        dimensions=3,
+    )
+
+    with pytest.raises(
+        EmbeddingConfigurationError,
+        match=(
+            "Embedding provider dimensions do not match "
+            "storage dimensions."
+        ),
+    ):
+        store_source_chunks(
+            session=session,
+            chunks=[make_chunk("chunk-1", "text")],
+            embedding_provider=provider,
+        )
+
+    assert provider.document_calls == []
+    session.execute.assert_not_called()
+    session.commit.assert_not_called()
+    session.rollback.assert_not_called()
+
+
+def test_store_source_chunks_rejects_embedding_count_mismatch():
+    session = MagicMock()
+    provider = FakeEmbeddingProvider(
+        embeddings=[
+            make_embedding(),
+        ],
+    )
     chunks = [
-        make_chunk("chunk-1", "text"),
+        make_chunk("chunk-1", "first"),
+        make_chunk("chunk-2", "second"),
     ]
 
-    with pytest.raises(RuntimeError, match="database failed"):
-        store_source_chunks(session, chunks)
-        
+    with pytest.raises(
+        InvalidEmbeddingResponseError,
+        match="Embedding count does not match chunk count.",
+    ):
+        store_source_chunks(
+            session=session,
+            chunks=chunks,
+            embedding_provider=provider,
+        )
+
+    assert provider.document_calls == [["first", "second"]]
+    session.execute.assert_not_called()
+    session.commit.assert_not_called()
+    session.rollback.assert_not_called()
+
+
+def test_store_source_chunks_rejects_invalid_vector_dimensions():
+    session = MagicMock()
+    provider = FakeEmbeddingProvider(
+        embeddings=[
+            [0.1, 0.2, 0.3],
+        ],
+        dimensions=EMBEDDING_DIMENSIONS,
+    )
+
+    with pytest.raises(
+        InvalidEmbeddingResponseError,
+        match=(
+            "Document embedding dimensions do not match "
+            "storage dimensions."
+        ),
+    ):
+        store_source_chunks(
+            session=session,
+            chunks=[make_chunk("chunk-1", "text")],
+            embedding_provider=provider,
+        )
+
+    session.execute.assert_not_called()
+    session.commit.assert_not_called()
+    session.rollback.assert_not_called()
+
+
+def test_store_source_chunks_rolls_back_and_reraises_on_failure():
+    session = MagicMock()
+    session.execute.side_effect = RuntimeError(
+        "database failed"
+    )
+    provider = FakeEmbeddingProvider(
+        embeddings=[
+            make_embedding(),
+        ],
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="database failed",
+    ):
+        store_source_chunks(
+            session=session,
+            chunks=[make_chunk("chunk-1", "text")],
+            embedding_provider=provider,
+        )
+
+    assert provider.document_calls == [["text"]]
     session.execute.assert_called_once()
     session.commit.assert_not_called()
     session.rollback.assert_called_once_with()

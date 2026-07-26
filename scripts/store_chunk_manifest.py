@@ -1,5 +1,4 @@
 import argparse
-import os
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -11,6 +10,8 @@ from copilot.storage.database import (
     create_session_factory,
     initialize_database,
 )
+from copilot.api.settings import load_api_settings
+from copilot.providers.factory import create_embedding_provider
 
 
 def main(argv: list[str] | None = None) -> int:  
@@ -21,22 +22,28 @@ def main(argv: list[str] | None = None) -> int:
     
     load_dotenv()
     
-    database_url = os.getenv("ANOMALYOPS_DATABASE_URL")
+    settings = load_api_settings()
     
-    if database_url is None:
+    if settings.database_url is None:
         raise RuntimeError(
             "ANOMALYOPS_DATABASE_URL is not configured"
         )
         
+    embedding_provider = create_embedding_provider(settings)
+        
     chunks = load_chunk_manifest(Path(args.manifest_path))
         
-    engine = create_engine_from_url(database_url)
+    engine = create_engine_from_url(settings.database_url)
     initialize_database(engine)
     
     SessionFactory = create_session_factory(engine)
     
     with SessionFactory() as session:
-        stored_chunks = store_source_chunks(session, chunks)
+        stored_chunks = store_source_chunks(
+            session=session,
+            chunks=chunks,
+            embedding_provider=embedding_provider
+        )
     
     print(f"Stored {stored_chunks} source chunks.")
                 
