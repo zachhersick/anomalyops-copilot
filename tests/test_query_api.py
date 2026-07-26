@@ -330,6 +330,14 @@ def test_query_endpoint_passes_full_settings_to_query_service():
     assert called_settings is settings
     assert called_request.query == "prediction api"
     assert called_request.top_k == 3
+    assert (
+        query_service.call_args.kwargs["session_factory"]
+        is test_app.state.session_factory
+    )
+    assert (
+        query_service.call_args.kwargs["embedding_provider"]
+        is test_app.state.embedding_provider
+    )
     
     
 def test_query_endpoint_maps_missing_database_url_to_500():
@@ -362,9 +370,10 @@ def test_query_endpoint_maps_missing_database_url_to_500():
     }
     
     
-def test_pgvector_app_creates_engine_once_and_reuses_session_factory():
+def test_pgvector_app_creates_engine_once_and_reuses_dependencies():
     engine = MagicMock()
     session_factory = MagicMock()
+    embedding_provider = MagicMock()
 
     settings = ApiSettings(
         retrieval_backend="pgvector",
@@ -396,6 +405,10 @@ def test_pgvector_app_creates_engine_once_and_reuses_session_factory():
             return_value=session_factory,
         ) as create_session_factory,
         patch(
+            "copilot.api.app.create_embedding_provider",
+            return_value=embedding_provider,
+        ) as create_embedding_provider,
+        patch(
             "copilot.api.app.query_service",
             return_value=expected_response,
         ) as query_service,
@@ -403,8 +416,14 @@ def test_pgvector_app_creates_engine_once_and_reuses_session_factory():
         test_app = create_app(settings=settings)
 
         with TestClient(test_app) as client:
-            first_response = client.post("/query", json=payload)
-            second_response = client.post("/query", json=payload)
+            first_response = client.post(
+                "/query",
+                json=payload,
+            )
+            second_response = client.post(
+                "/query",
+                json=payload,
+            )
 
     assert first_response.status_code == 200
     assert second_response.status_code == 200
@@ -413,7 +432,12 @@ def test_pgvector_app_creates_engine_once_and_reuses_session_factory():
         "postgresql+psycopg://test"
     )
     create_session_factory.assert_called_once_with(engine)
+    create_embedding_provider.assert_called_once_with(
+        settings,
+        openai_client=None,
+    )
 
+    assert test_app.state.embedding_provider is embedding_provider
     assert query_service.call_count == 2
 
     for query_call in query_service.call_args_list:
@@ -425,11 +449,16 @@ def test_pgvector_app_creates_engine_once_and_reuses_session_factory():
             query_call.kwargs["session_factory"]
             is session_factory
         )
+        assert (
+            query_call.kwargs["embedding_provider"]
+            is embedding_provider
+        )
         
         
 def test_pgvector_app_disposes_engine_on_shutdown():
     engine = MagicMock()
     session_factory = MagicMock()
+    embedding_provider = MagicMock()
 
     settings = ApiSettings(
         retrieval_backend="pgvector",
@@ -445,6 +474,10 @@ def test_pgvector_app_disposes_engine_on_shutdown():
             "copilot.api.app.create_session_factory",
             return_value=session_factory,
         ),
+        patch(
+            "copilot.api.app.create_embedding_provider",
+            return_value=embedding_provider,
+        ),
     ):
         test_app = create_app(settings=settings)
 
@@ -452,6 +485,45 @@ def test_pgvector_app_disposes_engine_on_shutdown():
             pass
 
     engine.dispose.assert_called_once_with()
+    
+    
+def test_manifest_app_does_not_create_embedding_provider():
+    settings = ApiSettings(
+        retrieval_backend="manifest",
+    )
+
+    with patch(
+        "copilot.api.app.create_embedding_provider",
+    ) as create_embedding_provider:
+        test_app = create_app(settings=settings)
+
+    assert test_app.state.embedding_provider is None
+    create_embedding_provider.assert_not_called()
+
+
+def test_pgvector_app_creates_deterministic_embedding_provider():
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url="postgresql+psycopg://test",
+        ai_provider="deterministic",
+        embedding_dimensions=16,
+    )
+
+    with (
+        patch(
+            "copilot.api.app.create_engine_from_url",
+        ),
+        patch(
+            "copilot.api.app.create_session_factory",
+        ),
+    ):
+        test_app = create_app(settings=settings)
+
+    provider = test_app.state.embedding_provider
+
+    assert provider is not None
+    assert provider.provider_name == "deterministic"
+    assert provider.dimensions == 16
     
     
 def post_query(payload: dict, tmp_path):

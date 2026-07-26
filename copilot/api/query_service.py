@@ -16,17 +16,20 @@ from copilot.api.errors import (
     ManifestFileNotFoundError,
     InvalidManifestError
 )
+from copilot.providers.interfaces import EmbeddingProvider
 
 
 def query_service(
     settings: ApiSettings,
     query_request: QueryRequest,
     session_factory: sessionmaker[Session] | None = None,
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> QueryResponse:
     selected_chunks = retrieve_chunks_for_query(
         settings,
         query_request,
-        session_factory=session_factory
+        session_factory=session_factory,
+        embedding_provider=embedding_provider,
     )
     
     grounded_answer = build_grounded_answer(
@@ -68,6 +71,7 @@ def retrieve_chunks_for_query(
     settings: ApiSettings,
     query_request: QueryRequest,
     session_factory: sessionmaker[Session] | None = None,
+    embedding_provider: EmbeddingProvider | None = None
 ) -> list[ScoredChunk]:
     retrieval_backend = settings.retrieval_backend
     
@@ -99,9 +103,13 @@ def retrieve_chunks_for_query(
             "Database session factory is not configured."
         )
         
+    if embedding_provider is None:
+        raise RuntimeError("Embedding provider is not configured.")
+        
     with session_factory() as session:
         return retrieve_relevant_chunks_from_pgvector(
             session=session,
             query=query_request.query,
+            embedding_provider=embedding_provider,
             top_k=query_request.top_k
         )

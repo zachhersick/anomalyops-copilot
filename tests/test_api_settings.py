@@ -237,3 +237,77 @@ def test_load_api_settings_rejects_invalid_ai_provider(
         ),
     ):
         load_api_settings()
+        
+        
+def test_api_settings_defaults_embedding_dimensions_to_16():
+    settings = ApiSettings()
+
+    assert settings.embedding_dimensions == 16
+
+
+def test_load_api_settings_defaults_embedding_dimensions_to_16(
+    monkeypatch,
+):
+    monkeypatch.delenv(
+        "ANOMALYOPS_EMBEDDING_DIMENSIONS",
+        raising=False,
+    )
+
+    settings = load_api_settings()
+
+    assert settings.embedding_dimensions == 16
+
+
+def test_load_api_settings_reads_embedding_dimensions(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "ANOMALYOPS_EMBEDDING_DIMENSIONS",
+        "1536",
+    )
+
+    settings = load_api_settings()
+
+    assert settings.embedding_dimensions == 1536
+    assert isinstance(settings.embedding_dimensions, int)
+
+
+def test_load_api_settings_rejects_non_integer_embedding_dimensions(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "ANOMALYOPS_EMBEDDING_DIMENSIONS",
+        "abc",
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "ANOMALYOPS_EMBEDDING_DIMENSIONS "
+            "must be an integer"
+        ),
+    ):
+        load_api_settings()
+
+
+@pytest.mark.parametrize(
+    "dimensions",
+    ["0", "-1", "-1536"],
+)
+def test_load_api_settings_rejects_non_positive_embedding_dimensions(
+    monkeypatch,
+    dimensions,
+):
+    monkeypatch.setenv(
+        "ANOMALYOPS_EMBEDDING_DIMENSIONS",
+        dimensions,
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            "ANOMALYOPS_EMBEDDING_DIMENSIONS "
+            "must be positive"
+        ),
+    ):
+        load_api_settings()

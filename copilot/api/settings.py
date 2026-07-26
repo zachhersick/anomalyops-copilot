@@ -15,6 +15,7 @@ EMBEDDING_MODEL_ENV_VAR = "ANOMALYOPS_EMBEDDING_MODEL"
 GROUNDED_ANSWER_MODEL_ENV_VAR = "ANOMALYOPS_GROUNDED_ANSWER_MODEL"
 TRIAGE_MODEL_ENV_VAR = "ANOMALYOPS_TRIAGE_MODEL"
 OPENAI_API_KEY_ENV_VAR = "OPENAI_API_KEY"
+EMBEDDING_DIMENSIONS_ENV_VAR = "ANOMALYOPS_EMBEDDING_DIMENSIONS"
 
 
 class ApiSettings(BaseModel):
@@ -27,6 +28,7 @@ class ApiSettings(BaseModel):
     grounded_answer_model: str | None = None
     triage_model: str | None = None
     openai_api_key: str | None = None
+    embedding_dimensions: int = 16
     
     
 def load_api_settings() -> ApiSettings:
@@ -91,7 +93,30 @@ def load_api_settings() -> ApiSettings:
         OPENAI_API_KEY_ENV_VAR,
     )
     
-    api_base_url = os.getenv("ANOMALYOPS_ANOMALY_API_BASE_URL")
+    embedding_dimensions_value = os.environ.get(
+        EMBEDDING_DIMENSIONS_ENV_VAR,
+        "16",
+    )
+    
+    try:
+        embedding_dimensions = int(
+            embedding_dimensions_value,
+        )
+    except ValueError as exc:
+        raise ValueError(
+            "ANOMALYOPS_EMBEDDING_DIMENSIONS must be an integer."
+        ) from exc
+        
+    if embedding_dimensions <= 0:
+        raise ValueError(
+            "ANOMALYOPS_EMBEDDING_DIMENSIONS must be positive."
+        )
+    
+    if not isinstance(embedding_dimensions, int):
+        raise ValueError("ANOMALYOPS_EMBEDDING_DIMENSIONS must be an integer.")
+    
+    if embedding_dimensions <= 0:
+        raise ValueError("ANOMALYOPS_EMBEDDING_DIMENSIONS must be positive.")
 
     return ApiSettings(
         retrieval_backend=retrieval_backend,
@@ -103,4 +128,5 @@ def load_api_settings() -> ApiSettings:
         grounded_answer_model=grounded_answer_model,
         triage_model=triage_model,
         openai_api_key=openai_api_key,
+        embedding_dimensions=embedding_dimensions,
     )

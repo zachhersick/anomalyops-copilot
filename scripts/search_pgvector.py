@@ -1,5 +1,4 @@
 import argparse
-import os
 
 from dotenv import load_dotenv
 
@@ -8,6 +7,8 @@ from copilot.storage.database import (
     create_engine_from_url,
     create_session_factory,
 )
+from copilot.api.settings import load_api_settings
+from copilot.providers.factory import create_embedding_provider
 
 
 def main(argv: list[str] | None = None) -> int:  
@@ -19,7 +20,15 @@ def main(argv: list[str] | None = None) -> int:
     
     load_dotenv()
     
-    database_url = os.getenv("ANOMALYOPS_DATABASE_URL")
+    settings = load_api_settings()
+    database_url = settings.database_url
+    
+    if database_url is None:
+        raise RuntimeError(
+            "ANOMALYOPS_DATABASE_URL is not configured"
+        )
+        
+    embedding_provider = create_embedding_provider(settings)
     
     if database_url is None:
         raise RuntimeError(
@@ -32,8 +41,9 @@ def main(argv: list[str] | None = None) -> int:
     
     with SessionFactory() as session:
         chunks = retrieve_relevant_chunks_from_pgvector(
-            session,
-            args.query,
+            session=session,
+            query=args.query,
+            embedding_provider=embedding_provider,
             top_k=args.top_k
         )
     
