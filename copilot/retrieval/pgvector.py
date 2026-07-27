@@ -4,8 +4,9 @@ from sqlalchemy.orm import Session
 from copilot.storage.models import SourceChunkRecord
 from copilot.schemas.chunk import SourceChunk
 from copilot.schemas.retrieval import ScoredChunk
-from copilot.retrieval.embeddings import embed_text
 from copilot.storage.models import EMBEDDING_DIMENSIONS
+from copilot.providers.errors import EmbeddingConfigurationError
+from copilot.providers.interfaces import EmbeddingProvider
 
 
 def source_chunk_record_to_chunk(
@@ -27,6 +28,7 @@ def source_chunk_record_to_chunk(
 def build_pgvector_retrieval_statement(
     query_embedding: list[float],
     top_k: int,
+    embedding_provider: EmbeddingProvider,
 ) -> Select:
     distance = SourceChunkRecord.embedding.cosine_distance(
         query_embedding
@@ -34,6 +36,11 @@ def build_pgvector_retrieval_statement(
     
     statement = (
         select(SourceChunkRecord, distance)
+        .where(
+            SourceChunkRecord.embedding_provider == embedding_provider.provider_name,
+            SourceChunkRecord.embedding_model == embedding_provider.model_name,
+            SourceChunkRecord.embedding_dimensions == embedding_provider.dimensions,
+        )
         .order_by(distance)
         .limit(top_k)
     )
@@ -44,17 +51,29 @@ def build_pgvector_retrieval_statement(
 def retrieve_relevant_chunks_from_pgvector(
     session: Session,
     query: str,
+    embedding_provider: EmbeddingProvider,
     top_k: int = 3,
 ) -> list[ScoredChunk]:
     if top_k <= 0:
         raise ValueError("top_k must be positive")
     
-    vector = embed_text(
-        query,
-        dimensions=EMBEDDING_DIMENSIONS
-    )
+    if embedding_provider.dimensions != EMBEDDING_DIMENSIONS:
+        raise EmbeddingConfigurationError(
+            "Embedding provider dimensions do not match storage dimensions."
+        )
     
-    statement = build_pgvector_retrieval_statement(vector, top_k)
+    query_embedding = embedding_provider.embed_query(query)
+    
+    if len(query_embedding) != EMBEDDING_DIMENSIONS:
+        raise EmbeddingConfigurationError(
+            "Query embedding dimensions do not match storage dimensions."
+        )
+    
+    statement = build_pgvector_retrieval_statement(
+        query_embedding, 
+        top_k,
+        embedding_provider,
+    )
     
     records = session.execute(statement).all()
     
@@ -69,7 +88,7 @@ def retrieve_relevant_chunks_from_pgvector(
         scored_chunks.append(
             ScoredChunk(
                 chunk=source_chunk,
-                score=1.0-distance,
+                score=1.0 - distance,
             )
         )
         

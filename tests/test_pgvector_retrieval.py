@@ -1,8 +1,10 @@
-import pytest
-
+from collections.abc import Sequence
 from unittest.mock import MagicMock, patch
+
+import pytest
 from sqlalchemy.dialects import postgresql
 
+from copilot.providers.errors import EmbeddingConfigurationError
 from copilot.retrieval.pgvector import (
     build_pgvector_retrieval_statement,
     retrieve_relevant_chunks_from_pgvector,
@@ -12,6 +14,34 @@ from copilot.storage.models import (
     EMBEDDING_DIMENSIONS,
     SourceChunkRecord,
 )
+
+
+class FakeEmbeddingProvider:
+    provider_name = "fake"
+    model_name = "fake-embedding"
+
+    def __init__(
+        self,
+        query_embedding: list[float] | None = None,
+        dimensions: int = EMBEDDING_DIMENSIONS,
+    ) -> None:
+        self.dimensions = dimensions
+        self.query_embedding = (
+            query_embedding
+            if query_embedding is not None
+            else [0.25] * dimensions
+        )
+        self.query_calls: list[str] = []
+
+    def embed_query(self, text: str) -> list[float]:
+        self.query_calls.append(text)
+        return list(self.query_embedding)
+
+    def embed_documents(
+        self,
+        texts: Sequence[str],
+    ) -> list[list[float]]:
+        raise NotImplementedError
 
 
 def make_record(
@@ -29,15 +59,18 @@ def make_record(
         content=content,
         start_line=1,
         end_line=5,
+        embedding_provider="fake",
+        embedding_model="fake-embedding",
+        embedding_dimensions=EMBEDDING_DIMENSIONS,
         embedding=[0.0] * EMBEDDING_DIMENSIONS,
     )
-    
-    
+
+
 def test_source_chunk_record_to_chunk_copies_expected_fields():
     record = make_record()
-    
+
     chunk = source_chunk_record_to_chunk(record)
-    
+
     assert chunk.chunk_id == "chunk-1"
     assert chunk.source_id == "source.py"
     assert chunk.project_name == "test-project"
@@ -47,79 +80,136 @@ def test_source_chunk_record_to_chunk_copies_expected_fields():
     assert chunk.content == "example content"
     assert chunk.start_line == 1
     assert chunk.end_line == 5
-    
-    
-def test_build_pgvector_retrieval_statement_uses_cosine_distance():
+
+
+def test_build_pgvector_retrieval_statement_uses_cosine_distance_and_metadata():
     query_embedding = [0.0] * EMBEDDING_DIMENSIONS
+    provider = FakeEmbeddingProvider()
 
     statement = build_pgvector_retrieval_statement(
         query_embedding,
         top_k=3,
+        embedding_provider=provider,
     )
 
-    compiled_sql = str(
-        statement.compile(
-            dialect=postgresql.dialect(),
-        )
+    compiled = statement.compile(
+        dialect=postgresql.dialect(),
     )
+    compiled_sql = str(compiled)
+    parameter_values = list(compiled.params.values())
 
     assert "<=>" in compiled_sql
     assert "ORDER BY" in compiled_sql
     assert "LIMIT" in compiled_sql
-    
-    
+
+    assert "embedding_provider" in compiled_sql
+    assert "embedding_model" in compiled_sql
+    assert "embedding_dimensions" in compiled_sql
+
+    assert provider.provider_name in parameter_values
+    assert provider.model_name in parameter_values
+    assert provider.dimensions in parameter_values
+
+
 @pytest.mark.parametrize("top_k", [0, -1])
 def test_retrieve_relevant_chunks_rejects_nonpositive_top_k(top_k):
     session = MagicMock()
+    provider = FakeEmbeddingProvider()
 
     with pytest.raises(ValueError, match="top_k must be positive"):
         retrieve_relevant_chunks_from_pgvector(
-            session,
-            "query",
+            session=session,
+            query="query",
+            embedding_provider=provider,
             top_k=top_k,
         )
 
+    assert provider.query_calls == []
     session.execute.assert_not_called()
-    
-    
+
+
+def test_retrieve_relevant_chunks_rejects_provider_dimension_mismatch():
+    session = MagicMock()
+    provider = FakeEmbeddingProvider(
+        dimensions=3,
+    )
+
+    with pytest.raises(
+        EmbeddingConfigurationError,
+        match=(
+            "Embedding provider dimensions do not match "
+            "storage dimensions."
+        ),
+    ):
+        retrieve_relevant_chunks_from_pgvector(
+            session=session,
+            query="query",
+            embedding_provider=provider,
+        )
+
+    assert provider.query_calls == []
+    session.execute.assert_not_called()
+
+
+def test_retrieve_relevant_chunks_rejects_query_embedding_dimension_mismatch():
+    session = MagicMock()
+    provider = FakeEmbeddingProvider(
+        query_embedding=[0.1, 0.2, 0.3],
+        dimensions=EMBEDDING_DIMENSIONS,
+    )
+
+    with pytest.raises(
+        EmbeddingConfigurationError,
+        match=(
+            "Query embedding dimensions do not match "
+            "storage dimensions."
+        ),
+    ):
+        retrieve_relevant_chunks_from_pgvector(
+            session=session,
+            query="query",
+            embedding_provider=provider,
+        )
+
+    assert provider.query_calls == ["query"]
+    session.execute.assert_not_called()
+
+
 def test_retrieve_relevant_chunks_embeds_query_and_executes_once():
     session = MagicMock()
     statement = MagicMock()
     query_embedding = [0.25] * EMBEDDING_DIMENSIONS
+    provider = FakeEmbeddingProvider(
+        query_embedding=query_embedding,
+    )
 
     session.execute.return_value.all.return_value = []
 
-    with (
-        patch(
-            "copilot.retrieval.pgvector.embed_text",
-            return_value=query_embedding,
-        ) as embed_text,
-        patch(
-            "copilot.retrieval.pgvector.build_pgvector_retrieval_statement",
-            return_value=statement,
-        ) as build_statement,
-    ):
+    with patch(
+        "copilot.retrieval.pgvector.build_pgvector_retrieval_statement",
+        return_value=statement,
+    ) as build_statement:
         results = retrieve_relevant_chunks_from_pgvector(
-            session,
-            "anomaly types",
+            session=session,
+            query="anomaly types",
+            embedding_provider=provider,
             top_k=4,
         )
 
     assert results == []
+    assert provider.query_calls == ["anomaly types"]
 
-    embed_text.assert_called_once_with(
-        "anomaly types",
-        dimensions=EMBEDDING_DIMENSIONS,
-    )
     build_statement.assert_called_once_with(
         query_embedding,
         4,
+        provider,
     )
     session.execute.assert_called_once_with(statement)
-    
-    
+
+
 def test_retrieve_relevant_chunks_converts_rows_to_scored_chunks():
     session = MagicMock()
+    provider = FakeEmbeddingProvider()
 
     first_record = make_record(
         chunk_id="chunk-1",
@@ -138,8 +228,9 @@ def test_retrieve_relevant_chunks_converts_rows_to_scored_chunks():
     ]
 
     results = retrieve_relevant_chunks_from_pgvector(
-        session,
-        "query",
+        session=session,
+        query="query",
+        embedding_provider=provider,
         top_k=2,
     )
 
@@ -153,18 +244,23 @@ def test_retrieve_relevant_chunks_converts_rows_to_scored_chunks():
     assert results[1].chunk.source_path == "second.py"
     assert results[1].score == pytest.approx(0.5)
 
+    assert provider.query_calls == ["query"]
     session.execute.assert_called_once()
-    
-    
+
+
 def test_retrieve_relevant_chunks_returns_empty_list_for_no_rows():
     session = MagicMock()
+    provider = FakeEmbeddingProvider()
+
     session.execute.return_value.all.return_value = []
 
     results = retrieve_relevant_chunks_from_pgvector(
-        session,
-        "query",
+        session=session,
+        query="query",
+        embedding_provider=provider,
         top_k=3,
     )
 
     assert results == []
+    assert provider.query_calls == ["query"]
     session.execute.assert_called_once()

@@ -9,12 +9,13 @@ from copilot.storage.database import (
     create_engine_from_url,
     create_session_factory,
     initialize_database,
+    rebuild_source_chunks_table,
 )
 from copilot.api.settings import load_api_settings
 from copilot.providers.factory import create_embedding_provider
 
 
-def main(argv: list[str] | None = None) -> int:  
+def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest_path")
     
@@ -36,16 +37,18 @@ def main(argv: list[str] | None = None) -> int:
     engine = create_engine_from_url(settings.database_url)
     initialize_database(engine)
     
+    rebuild_source_chunks_table(engine)
+    
     SessionFactory = create_session_factory(engine)
     
     with SessionFactory() as session:
         stored_chunks = store_source_chunks(
             session=session,
             chunks=chunks,
-            embedding_provider=embedding_provider
+            embedding_provider=embedding_provider,
         )
     
-    print(f"Stored {stored_chunks} source chunks.")
+    print(f"Reindexed {stored_chunks} source chunks.")
                 
     return 0
 

@@ -1,6 +1,7 @@
 import httpx
 
 from fastapi import FastAPI, HTTPException, Request
+from openai import OpenAI
 
 from copilot.schemas.query import QueryRequest, QueryResponse
 from copilot.api.settings import ApiSettings, load_api_settings
@@ -26,11 +27,13 @@ from copilot.services.triage import (
 )
 from copilot.tools.anomaly import AnomalyOperationalTools
 from copilot.clients.anomaly_api import AnomalyApiClient
+from copilot.providers.factory import create_embedding_provider
 
 
 def create_app(
     settings: ApiSettings | None = None,
     anomaly_transport: httpx.BaseTransport | None = None,
+    openai_client: OpenAI | None = None
 ) -> FastAPI:
     app = FastAPI(
         title="AnomalyOps-Copilot API",
@@ -46,6 +49,7 @@ def create_app(
     app.state.anomaly_client = None
     app.state.anomaly_tools = None
     app.state.triage_service = None
+    app.state.embedding_provider = None
     
     if (
         resolved_settings.retrieval_backend == "pgvector"
@@ -55,6 +59,11 @@ def create_app(
         
         app.state.database_engine = engine
         app.state.session_factory = create_session_factory(engine)
+        
+        app.state.embedding_provider = create_embedding_provider(
+            resolved_settings,
+            openai_client=openai_client,
+        )
         
     if resolved_settings.anomaly_api_base_url is not None:
         anomaly_client = AnomalyApiClient(
@@ -78,12 +87,14 @@ def create_app(
     @app.post("/query", response_model=QueryResponse)
     def query(request: Request, query_request: QueryRequest) -> QueryResponse:
         settings = request.app.state.settings
+        embedding_provider=request.app.state.embedding_provider
         
         try:
             query_response = query_service(
                 settings,
                 query_request,
                 session_factory=request.app.state.session_factory,
+                embedding_provider=embedding_provider,
             )
         except ManifestNotConfiguredError:
             raise HTTPException(

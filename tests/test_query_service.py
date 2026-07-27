@@ -1,6 +1,7 @@
 import pytest
 
 from unittest.mock import MagicMock, patch
+from collections.abc import Sequence
 
 from copilot.api.query_service import query_service, retrieve_chunks_for_query
 from copilot.ingestion.manifest import write_chunk_manifest
@@ -14,6 +15,24 @@ from copilot.api.errors import (
     InvalidManifestError,
     DatabaseNotConfiguredError,
 )
+
+
+class FakeEmbeddingProvider:
+    provider_name = "fake"
+    model_name = "fake-embedding"
+    dimensions = 16
+
+    def embed_query(
+        self,
+        text: str,
+    ) -> list[float]:
+        return [0.25] * self.dimensions
+
+    def embed_documents(
+        self,
+        texts: Sequence[str],
+    ) -> list[list[float]]:
+        raise NotImplementedError
 
 
 def test_service_returns_grounded_answer_with_citations(tmp_path):
@@ -240,6 +259,7 @@ def test_retrieve_chunks_for_query_uses_shared_pgvector_session_factory():
     session = MagicMock()
     session_factory = MagicMock()
     session_factory.return_value.__enter__.return_value = session
+    embedding_provider = FakeEmbeddingProvider()
 
     expected_results = [
         ScoredChunk(
@@ -269,6 +289,7 @@ def test_retrieve_chunks_for_query_uses_shared_pgvector_session_factory():
             settings,
             query_request,
             session_factory=session_factory,
+            embedding_provider=embedding_provider,
         )
 
     assert results == expected_results
@@ -277,6 +298,7 @@ def test_retrieve_chunks_for_query_uses_shared_pgvector_session_factory():
     retrieve_pgvector.assert_called_once_with(
         session=session,
         query="prediction api",
+        embedding_provider=embedding_provider,
         top_k=4,
     )
     
@@ -368,8 +390,10 @@ def test_pgvector_backend_requires_session_factory():
         )
         
         
-def test_query_service_passes_session_factory_to_retrieval():
+def test_query_service_passes_session_factory_and_provider_to_retrieval():
     session_factory = MagicMock()
+    embedding_provider = FakeEmbeddingProvider()
+
     scored_chunks = [
         ScoredChunk(
             chunk=make_chunk(
@@ -395,12 +419,14 @@ def test_query_service_passes_session_factory_to_retrieval():
             settings,
             query_request,
             session_factory=session_factory,
+            embedding_provider=embedding_provider,
         )
 
     retrieve_chunks.assert_called_once_with(
         settings,
         query_request,
         session_factory=session_factory,
+        embedding_provider=embedding_provider,
     )
     
     
@@ -436,3 +462,25 @@ def make_chunk(
         start_line=start_line,
         end_line=end_line,
     )
+    
+    
+def test_pgvector_backend_requires_embedding_provider():
+    session_factory = MagicMock()
+
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url="postgresql+psycopg://test",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Embedding provider is not configured.",
+    ):
+        retrieve_chunks_for_query(
+            settings,
+            make_query_request(query="prediction api"),
+            session_factory=session_factory,
+            embedding_provider=None,
+        )
+
+    session_factory.assert_not_called()
