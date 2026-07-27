@@ -28,6 +28,7 @@ def source_chunk_record_to_chunk(
 def build_pgvector_retrieval_statement(
     query_embedding: list[float],
     top_k: int,
+    embedding_provider: EmbeddingProvider,
 ) -> Select:
     distance = SourceChunkRecord.embedding.cosine_distance(
         query_embedding
@@ -35,6 +36,11 @@ def build_pgvector_retrieval_statement(
     
     statement = (
         select(SourceChunkRecord, distance)
+        .where(
+            SourceChunkRecord.embedding_provider == embedding_provider.provider_name,
+            SourceChunkRecord.embedding_model == embedding_provider.model_name,
+            SourceChunkRecord.embedding_dimensions == embedding_provider.dimensions,
+        )
         .order_by(distance)
         .limit(top_k)
     )
@@ -63,7 +69,11 @@ def retrieve_relevant_chunks_from_pgvector(
             "Query embedding dimensions do not match storage dimensions."
         )
     
-    statement = build_pgvector_retrieval_statement(query_embedding, top_k)
+    statement = build_pgvector_retrieval_statement(
+        query_embedding, 
+        top_k,
+        embedding_provider,
+    )
     
     records = session.execute(statement).all()
     
@@ -78,7 +88,7 @@ def retrieve_relevant_chunks_from_pgvector(
         scored_chunks.append(
             ScoredChunk(
                 chunk=source_chunk,
-                score=1.0-distance,
+                score=1.0 - distance,
             )
         )
         

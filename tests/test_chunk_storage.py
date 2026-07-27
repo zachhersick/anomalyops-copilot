@@ -55,13 +55,15 @@ def make_embedding(
 
 def test_source_chunk_to_values_copies_fields_and_given_embedding():
     embedding = make_embedding()
+    provider = FakeEmbeddingProvider([embedding])
 
     values = source_chunk_to_values(
         make_chunk("chunk-1", "text"),
         embedding,
+        provider,
     )
 
-    assert len(values) == 10
+    assert len(values) == 13
     assert values["chunk_id"] == "chunk-1"
     assert values["source_id"] == "source.py"
     assert values["project_name"] == "test-project"
@@ -71,6 +73,9 @@ def test_source_chunk_to_values_copies_fields_and_given_embedding():
     assert values["content"] == "text"
     assert values["start_line"] == 1
     assert values["end_line"] == 2
+    assert values["embedding_provider"] == "fake"
+    assert values["embedding_model"] == "fake-embedding"
+    assert values["embedding_dimensions"] == EMBEDDING_DIMENSIONS
     assert values["embedding"] == embedding
 
 
@@ -82,9 +87,12 @@ def test_build_source_chunk_upsert_statement_uses_chunk_id_conflict():
         make_embedding(),
     ]
 
+    provider = FakeEmbeddingProvider(embeddings)
+
     statement = build_source_chunk_upsert_statement(
         chunks,
         embeddings,
+        provider,
     )
 
     compiled_sql = str(
@@ -104,6 +112,8 @@ def test_build_source_chunk_upsert_statement_rejects_count_mismatch():
     embeddings = [
         make_embedding(),
     ]
+    
+    provider = FakeEmbeddingProvider(embeddings)
 
     with pytest.raises(
         InvalidEmbeddingResponseError,
@@ -112,6 +122,7 @@ def test_build_source_chunk_upsert_statement_rejects_count_mismatch():
         build_source_chunk_upsert_statement(
             chunks,
             embeddings,
+            provider,
         )
 
 
@@ -145,6 +156,7 @@ def test_store_source_chunks_batches_documents_and_commits():
     build_statement.assert_called_once_with(
         chunks,
         embeddings,
+        provider,
     )
     session.execute.assert_called_once_with(statement)
     session.commit.assert_called_once_with()

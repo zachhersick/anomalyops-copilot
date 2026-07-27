@@ -1,5 +1,5 @@
 from pgvector.sqlalchemy import VECTOR
-from sqlalchemy import String, Text
+from sqlalchemy import String, Text, Integer
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -50,6 +50,18 @@ class SourceChunkRecord(Base):
     )
     end_line: Mapped[int] = mapped_column(
         nullable=False,
+    )
+    embedding_provider: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    embedding_model: Mapped[str] = mapped_column(
+        String,
+        nullable=False,
+    )
+    embedding_dimensions: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False
     )
     embedding: Mapped[list[float]] = mapped_column(
         VECTOR(EMBEDDING_DIMENSIONS),

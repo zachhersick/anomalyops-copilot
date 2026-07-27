@@ -2,7 +2,7 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from copilot.storage.models import Base
+from copilot.storage.models import Base, SourceChunkRecord
 
 
 def create_engine_from_url(database_url: str) -> Engine:
@@ -21,3 +21,18 @@ def initialize_database(engine: Engine) -> None:
             text("CREATE EXTENSION IF NOT EXISTS vector")
         )
         Base.metadata.create_all(bind=connection)
+        
+
+def rebuild_source_chunks_table(
+    engine: Engine,
+) -> None:
+    table = SourceChunkRecord.__table__
+    
+    table.drop(
+        bind=engine,
+        checkfirst=True,
+    )
+    table.create(
+        bind=engine,
+        checkfirst=False,
+    )

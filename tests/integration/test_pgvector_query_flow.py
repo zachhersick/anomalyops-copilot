@@ -1,6 +1,5 @@
 import pytest
 
-from sqlalchemy import delete
 from fastapi.testclient import TestClient
 
 from copilot.schemas.chunk import SourceChunk
@@ -9,13 +8,17 @@ from copilot.storage.database import (
     create_engine_from_url,
     create_session_factory,
     initialize_database,
+    rebuild_source_chunks_table,
 )
-from copilot.storage.models import SourceChunkRecord
+from copilot.storage.models import EMBEDDING_DIMENSIONS
 from copilot.retrieval.pgvector import (
     retrieve_relevant_chunks_from_pgvector,
 )
 from copilot.api.app import create_app
 from copilot.api.settings import ApiSettings
+from copilot.providers.deterministic_embeddings import (
+    DeterministicEmbeddingProvider
+)
 
 
 @pytest.mark.integration
@@ -25,11 +28,11 @@ def test_pgvector_storage_and_retrieval_flow(
     engine = create_engine_from_url(test_database_url)
     initialize_database(engine)
     
-    SessionFactory = create_session_factory(engine)
+    rebuild_source_chunks_table(engine)
     
-    with SessionFactory() as session:
-        session.execute(delete(SourceChunkRecord))
-        session.commit()
+    provider = DeterministicEmbeddingProvider(EMBEDDING_DIMENSIONS)
+    
+    SessionFactory = create_session_factory(engine)
         
     chunks = [
         SourceChunk(
@@ -57,8 +60,17 @@ def test_pgvector_storage_and_retrieval_flow(
     ]
     
     with SessionFactory() as session:
-        stored_chunks = store_source_chunks(session, chunks)
-        selected_chunks = retrieve_relevant_chunks_from_pgvector(session, "Where is the prediction API endpoint?", 2)
+        stored_chunks = store_source_chunks(
+            session=session,
+            chunks=chunks,
+            embedding_provider=provider,
+        )
+        selected_chunks = retrieve_relevant_chunks_from_pgvector(
+            session=session,
+            query="The prediction API exposes a /predict endpoint.",
+            embedding_provider=provider,
+            top_k=2,
+        )
         
     assert stored_chunks == 2
     assert len(selected_chunks) == 2
@@ -76,11 +88,11 @@ def test_pgvector_query_api_flow(
     engine = create_engine_from_url(test_database_url)
     initialize_database(engine)
     
-    SessionFactory = create_session_factory(engine)
+    rebuild_source_chunks_table(engine)
     
-    with SessionFactory() as session:
-        session.execute(delete(SourceChunkRecord))
-        session.commit()
+    provider = DeterministicEmbeddingProvider(EMBEDDING_DIMENSIONS)
+    
+    SessionFactory = create_session_factory(engine)
         
     chunks = [
         SourceChunk(
@@ -108,13 +120,19 @@ def test_pgvector_query_api_flow(
     ]
     
     with SessionFactory() as session:
-        stored_chunks = store_source_chunks(session, chunks)
+        stored_chunks = store_source_chunks(
+            session=session,
+            chunks=chunks,
+            embedding_provider=provider,
+        )
         
     assert stored_chunks == 2
     
     settings = ApiSettings(
         retrieval_backend="pgvector",
         database_url=test_database_url,
+        ai_provider="deterministic",
+        embedding_dimensions=EMBEDDING_DIMENSIONS,
     )
     
     test_app = create_app(settings)
@@ -123,7 +141,7 @@ def test_pgvector_query_api_flow(
         response = client.post(
             "/query",
             json={
-                "query": "Where is the prediction API endpoint?",
+                "query": "The prediction API exposes a /predict endpoint.",
                 "top_k": 1,
                 "min_score": 0.0,
                 "show_context": True,

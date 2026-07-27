@@ -1,6 +1,6 @@
 from pgvector.sqlalchemy import VECTOR
 
-from copilot.storage.models import(
+from copilot.storage.models import (
     EMBEDDING_DIMENSIONS,
     SourceChunkRecord,
 )
@@ -8,10 +8,10 @@ from copilot.storage.models import(
 
 def test_source_chunk_record_uses_expected_table_name():
     table = SourceChunkRecord.__table__
-    
+
     assert table.name == "source_chunks"
-    
-    
+
+
 def test_source_chunk_record_has_expected_columns():
     table = SourceChunkRecord.__table__
 
@@ -26,6 +26,9 @@ def test_source_chunk_record_has_expected_columns():
         "content",
         "start_line",
         "end_line",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_dimensions",
         "embedding",
     }
 
@@ -45,6 +48,9 @@ def test_source_chunk_record_requires_chunk_fields():
         "content",
         "start_line",
         "end_line",
+        "embedding_provider",
+        "embedding_model",
+        "embedding_dimensions",
         "embedding",
     }
 
@@ -61,7 +67,9 @@ def test_source_chunk_record_chunk_id_is_unique():
 
 
 def test_source_chunk_record_embedding_is_vector_16():
-    embedding_type = SourceChunkRecord.__table__.columns["embedding"].type
+    embedding_type = (
+        SourceChunkRecord.__table__.columns["embedding"].type
+    )
 
     assert isinstance(embedding_type, VECTOR)
     assert embedding_type.dim == EMBEDDING_DIMENSIONS

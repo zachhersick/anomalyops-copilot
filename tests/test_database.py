@@ -1,11 +1,14 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 from copilot.storage.database import (
     create_engine_from_url,
     create_session_factory,
     initialize_database,
+    rebuild_source_chunks_table,
 )
-from copilot.storage.models import Base
+from copilot.storage.models import Base, SourceChunkRecord
 
 
 def test_create_engine_from_url_uses_postgresql_psycopg():
@@ -45,3 +48,41 @@ def test_initialize_database_enables_vector_and_creates_tables():
 
     assert str(statement) == "CREATE EXTENSION IF NOT EXISTS vector"
     create_all.assert_called_once_with(bind=connection)
+
+
+def test_rebuild_source_chunks_table_drops_and_recreates_only_that_table():
+    engine = MagicMock()
+    table = SourceChunkRecord.__table__
+
+    with (
+        patch.object(table, "drop") as drop,
+        patch.object(table, "create") as create,
+    ):
+        rebuild_source_chunks_table(engine)
+
+    drop.assert_called_once_with(
+        bind=engine,
+        checkfirst=True,
+    )
+    create.assert_called_once_with(
+        bind=engine,
+        checkfirst=False,
+    )
+
+
+def test_rebuild_source_chunks_table_propagates_drop_failure():
+    engine = MagicMock()
+    table = SourceChunkRecord.__table__
+
+    with (
+        patch.object(
+            table,
+            "drop",
+            side_effect=RuntimeError("drop failed"),
+        ),
+        patch.object(table, "create") as create,
+    ):
+        with pytest.raises(RuntimeError, match="drop failed"):
+            rebuild_source_chunks_table(engine)
+
+    create.assert_not_called()

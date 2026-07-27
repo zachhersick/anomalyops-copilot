@@ -17,6 +17,7 @@ from copilot.providers.interfaces import (
 def source_chunk_to_values(
     chunk: SourceChunk,
     embedding: list[float],
+    embedding_provider: EmbeddingProvider,
 ) -> dict[str, object]:
     return {
         "chunk_id": chunk.chunk_id,
@@ -28,6 +29,9 @@ def source_chunk_to_values(
         "content": chunk.content,
         "start_line": chunk.start_line,
         "end_line": chunk.end_line,
+        "embedding_provider": embedding_provider.provider_name,
+        "embedding_model": embedding_provider.model_name,
+        "embedding_dimensions": embedding_provider.dimensions,
         "embedding": list(embedding),
     }
     
@@ -35,6 +39,7 @@ def source_chunk_to_values(
 def build_source_chunk_upsert_statement(
     chunks: list[SourceChunk],
     embeddings: list[list[float]],
+    embedding_provider: EmbeddingProvider,
 ) -> Insert:
     if len(chunks) != len(embeddings):
         raise InvalidEmbeddingResponseError(
@@ -42,7 +47,7 @@ def build_source_chunk_upsert_statement(
         )
     
     values = [
-        source_chunk_to_values(chunk, embedding)
+        source_chunk_to_values(chunk, embedding, embedding_provider)
         for chunk, embedding in zip(chunks, embeddings)
     ]
     
@@ -59,6 +64,9 @@ def build_source_chunk_upsert_statement(
             "content": statement.excluded.content,
             "start_line": statement.excluded.start_line,
             "end_line": statement.excluded.end_line,
+            "embedding_provider": statement.excluded.embedding_provider,
+            "embedding_model": statement.excluded.embedding_model,
+            "embedding_dimensions": statement.excluded.embedding_dimensions,
             "embedding": statement.excluded.embedding,
         }
     )
@@ -97,7 +105,11 @@ def store_source_chunks(
         )
     
     try:
-        statement = build_source_chunk_upsert_statement(chunks, embeddings)
+        statement = build_source_chunk_upsert_statement(
+            chunks,
+            embeddings,
+            embedding_provider,
+        )
         session.execute(statement)
         session.commit()
     except Exception:
