@@ -19,6 +19,12 @@ from copilot.api.settings import ApiSettings
 from copilot.providers.deterministic_embeddings import (
     DeterministicEmbeddingProvider
 )
+from copilot.api.query_service import query_service
+
+from copilot.providers.deterministic_answers import (
+    DeterministicGroundedAnswerGenerator,
+)
+from copilot.schemas.query import QueryRequest
 
 
 @pytest.mark.integration
@@ -168,3 +174,88 @@ def test_pgvector_query_api_flow(
     assert snippet["content"] == (
         "The prediction API exposes a /predict endpoint."
     )
+    
+    
+@pytest.mark.integration
+def test_pgvector_query_flow_returns_deterministic_grounded_answer(
+    test_database_url: str,
+):
+    engine = create_engine_from_url(test_database_url)
+    initialize_database(engine)
+    rebuild_source_chunks_table(engine)
+
+    embedding_provider = DeterministicEmbeddingProvider(
+        EMBEDDING_DIMENSIONS
+    )
+    answer_generator = DeterministicGroundedAnswerGenerator()
+    session_factory = create_session_factory(engine)
+
+    chunk = SourceChunk(
+        chunk_id="chunk-1",
+        source_id="api.py",
+        project_name="anomaly-detection",
+        source_type="python",
+        source_path="api.py",
+        chunk_index=0,
+        content="The prediction API exposes POST /predict.",
+        start_line=10,
+        end_line=20,
+    )
+
+    with session_factory() as session:
+        stored_chunks = store_source_chunks(
+            session=session,
+            chunks=[chunk],
+            embedding_provider=embedding_provider,
+        )
+
+    assert stored_chunks == 1
+
+    response = query_service(
+        settings=ApiSettings(
+            retrieval_backend="pgvector",
+            database_url=test_database_url,
+            ai_provider="deterministic",
+            embedding_dimensions=EMBEDDING_DIMENSIONS,
+        ),
+        query_request=QueryRequest(
+            query="The prediction API exposes POST /predict.",
+            top_k=1,
+            min_score=0.0,
+            show_context=True,
+        ),
+        session_factory=session_factory,
+        embedding_provider=embedding_provider,
+        grounded_answer_generator=answer_generator,
+    )
+
+    assert response.refusal_reason is None
+    assert response.answer == (
+        "The retrieved context says: "
+        "The prediction API exposes POST /predict. [1]"
+    )
+    assert response.confidence == pytest.approx(1.0)
+
+    assert len(response.citations) == 1
+
+    citation = response.citations[0]
+
+    assert citation.citation_id == 1
+    assert citation.source_path == "api.py"
+    assert citation.start_line == 10
+    assert citation.end_line == 20
+
+    assert response.context is not None
+    assert len(response.context_snippets) == 1
+
+    snippet = response.context_snippets[0]
+
+    assert snippet.citation_id == 1
+    assert snippet.source_path == "api.py"
+    assert snippet.start_line == 10
+    assert snippet.end_line == 20
+    assert snippet.content == (
+        "The prediction API exposes POST /predict."
+    )
+
+    engine.dispose()

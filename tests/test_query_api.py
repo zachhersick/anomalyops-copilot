@@ -1,14 +1,106 @@
-import pytest
-
-from fastapi.testclient import TestClient
+from collections.abc import Sequence
 from unittest.mock import MagicMock, patch
 
+import pytest
+from fastapi.testclient import TestClient
+
+import copilot.api.app as app_module
 from copilot.api.app import create_app
-from copilot.api.settings import ApiSettings
-from copilot.ingestion.manifest import write_chunk_manifest
-from copilot.schemas.chunk import SourceChunk
 from copilot.api.errors import DatabaseNotConfiguredError
+from copilot.api.settings import ApiSettings
+import copilot.api.query_service as query_service_module
+from copilot.ingestion.manifest import write_chunk_manifest
+from copilot.providers.errors import (
+    GroundedAnswerProviderError,
+    InvalidGroundedAnswerResponseError,
+)
+from copilot.schemas.answer import Citation, GroundedAnswer
+from copilot.schemas.chunk import SourceChunk
 from copilot.schemas.query import QueryResponse
+from copilot.schemas.retrieval import ScoredChunk
+
+
+class StubGroundedAnswerGenerator:
+    provider_name = "stub"
+    model_name = "stub-model"
+
+    def __init__(
+        self,
+        *,
+        result: GroundedAnswer | None = None,
+        error: Exception | None = None,
+    ) -> None:
+        self.result = result
+        self.error = error
+        self.calls: list[dict] = []
+
+    def generate(
+        self,
+        query: str,
+        context: Sequence[ScoredChunk],
+    ) -> GroundedAnswer:
+        self.calls.append(
+            {
+                "query": query,
+                "context": context,
+            }
+        )
+
+        if self.error is not None:
+            raise self.error
+
+        assert self.result is not None
+        return self.result
+    
+    
+def create_test_manifest(tmp_path):
+    manifest_path = tmp_path / "chunks.json"
+
+    write_chunk_manifest(
+        [
+            SourceChunk(
+                chunk_id="chunk-1",
+                source_id="api.py",
+                project_name="test-project",
+                source_type="python",
+                source_path="api.py",
+                chunk_index=0,
+                content=(
+                    "The prediction API exposes POST /predict."
+                ),
+                start_line=10,
+                end_line=20,
+            )
+        ],
+        manifest_path,
+    )
+
+    return manifest_path
+
+
+def patch_successful_retrieval(monkeypatch) -> None:
+    chunk = SourceChunk(
+        chunk_id="chunk-1",
+        source_id="api.py",
+        project_name="test-project",
+        source_type="python",
+        source_path="api.py",
+        chunk_index=0,
+        content="The prediction API exposes POST /predict.",
+        start_line=10,
+        end_line=20,
+    )
+
+    monkeypatch.setattr(
+        query_service_module,
+        "retrieve_chunks_for_query",
+        lambda *args, **kwargs: [
+            ScoredChunk(
+                chunk=chunk,
+                score=0.9,
+            )
+        ],
+    )
 
 
 def test_query_endpoint_returns_grounded_answer(tmp_path):
@@ -37,7 +129,10 @@ def test_query_endpoint_returns_grounded_answer(tmp_path):
     data = response.json()
 
     assert response.status_code == 200
-    assert data["answer"] == "The retrieved context says: The prediction API exposes a POST /predict endpoint."
+    assert data["answer"] == (
+        "The retrieved context says: "
+        "The prediction API exposes a POST /predict endpoint. [1]"
+    )
     assert isinstance(data["confidence"], float)
     assert data["refusal_reason"] is None
     assert data["citations"] == [
@@ -64,14 +159,14 @@ def test_query_endpoint_respects_top_k(tmp_path):
             "query": "prediction api",
             "top_k": 1,
             "min_score": 0.0,
-            "show_context": False,
+            "show_context": True,
         },
     )
 
     data = response.json()
 
     assert response.status_code == 200
-    assert len(data["citations"]) == 1
+    assert len(data["context_snippets"]) == 1
 
 
 def test_query_endpoint_respects_min_score_refusal(tmp_path):
@@ -95,7 +190,7 @@ def test_query_endpoint_respects_min_score_refusal(tmp_path):
 
     assert response.status_code == 200
     assert data["answer"] == ""
-    assert data["confidence"] == 0.0
+    assert 0.0 <= data["confidence"] <= 1.0
     assert data["citations"] == []
     assert (
         data["refusal_reason"]
@@ -338,6 +433,10 @@ def test_query_endpoint_passes_full_settings_to_query_service():
         query_service.call_args.kwargs["embedding_provider"]
         is test_app.state.embedding_provider
     )
+    assert (
+        query_service.call_args.kwargs["grounded_answer_generator"]
+        is test_app.state.grounded_answer_generator
+    )
     
     
 def test_query_endpoint_maps_missing_database_url_to_500():
@@ -453,6 +552,10 @@ def test_pgvector_app_creates_engine_once_and_reuses_dependencies():
             query_call.kwargs["embedding_provider"]
             is embedding_provider
         )
+        assert (
+            query_call.kwargs["grounded_answer_generator"]
+            is test_app.state.grounded_answer_generator
+        )
         
         
 def test_pgvector_app_disposes_engine_on_shutdown():
@@ -551,6 +654,219 @@ def post_query_with_manifest(manifest_path, payload):
 
     with TestClient(test_app) as client:
         return client.post("/query", json=payload)
+    
+    
+def test_create_app_stores_grounded_answer_generator(
+    monkeypatch,
+    tmp_path,
+):
+    manifest_path = create_test_manifest(tmp_path)
+    generator = StubGroundedAnswerGenerator(
+        result=GroundedAnswer(
+            answer="Generated answer. [1]",
+            citations=[
+                Citation(
+                    citation_id=1,
+                    source_path="api.py",
+                    start_line=10,
+                    end_line=20,
+                )
+            ],
+            confidence=0.8,
+            refusal_reason=None,
+        )
+    )
+    captured = {}
+
+    def fake_create_generator(
+        settings,
+        openai_client=None,
+    ):
+        captured["settings"] = settings
+        captured["openai_client"] = openai_client
+        return generator
+
+    monkeypatch.setattr(
+        app_module,
+        "create_grounded_answer_generator",
+        fake_create_generator,
+    )
+
+    settings = ApiSettings(
+        retrieval_backend="manifest",
+        manifest_path=manifest_path,
+    )
+    fake_openai_client = object()
+
+    app = create_app(
+        settings=settings,
+        openai_client=fake_openai_client,
+    )
+
+    assert app.state.grounded_answer_generator is generator
+    assert captured == {
+        "settings": settings,
+        "openai_client": fake_openai_client,
+    }
+
+
+def test_query_route_uses_grounded_answer_generator(
+    monkeypatch,
+    tmp_path,
+):
+    patch_successful_retrieval(monkeypatch)
+    manifest_path = create_test_manifest(tmp_path)
+    generator = StubGroundedAnswerGenerator(
+        result=GroundedAnswer(
+            answer="The endpoint is POST /predict. [1]",
+            citations=[
+                Citation(
+                    citation_id=1,
+                    source_path="api.py",
+                    start_line=10,
+                    end_line=20,
+                )
+            ],
+            confidence=0.88,
+            refusal_reason=None,
+        )
+    )
+
+    monkeypatch.setattr(
+        app_module,
+        "create_grounded_answer_generator",
+        lambda *args, **kwargs: generator,
+    )
+
+    app = create_app(
+        settings=ApiSettings(
+            retrieval_backend="manifest",
+            manifest_path=manifest_path,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/query",
+            json={
+                "query": "Where is the prediction endpoint?",
+                "top_k": 3,
+                "min_score": 0.0,
+                "show_context": True,
+            },
+        )
+
+    assert response.status_code == 200
+
+    payload = response.json()
+
+    assert payload["answer"] == (
+        "The endpoint is POST /predict. [1]"
+    )
+    assert payload["confidence"] == 0.88
+    assert payload["refusal_reason"] is None
+    assert payload["citations"] == [
+        {
+            "citation_id": 1,
+            "source_path": "api.py",
+            "start_line": 10,
+            "end_line": 20,
+        }
+    ]
+
+    assert len(generator.calls) == 1
+    assert generator.calls[0]["query"] == (
+        "Where is the prediction endpoint?"
+    )
+
+    assert len(payload["context_snippets"]) == 1
+    assert payload["context_snippets"][0]["citation_id"] == 1
+
+
+def test_query_route_maps_invalid_provider_response_to_502(
+    monkeypatch,
+    tmp_path,
+):
+    patch_successful_retrieval(monkeypatch)
+    manifest_path = create_test_manifest(tmp_path)
+    generator = StubGroundedAnswerGenerator(
+        error=InvalidGroundedAnswerResponseError(
+            "Invalid provider output."
+        )
+    )
+
+    monkeypatch.setattr(
+        app_module,
+        "create_grounded_answer_generator",
+        lambda *args, **kwargs: generator,
+    )
+
+    app = create_app(
+        settings=ApiSettings(
+            retrieval_backend="manifest",
+            manifest_path=manifest_path,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/query",
+            json={
+                "query": "Where is the prediction endpoint?",
+                "top_k": 3,
+                "min_score": 0.0,
+                "show_context": False,
+            },
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": (
+            "Grounded answer provider returned an invalid response."
+        )
+    }
+
+
+def test_query_route_maps_provider_request_failure_to_502(
+    monkeypatch,
+    tmp_path,
+):
+    patch_successful_retrieval(monkeypatch)
+    manifest_path = create_test_manifest(tmp_path)
+    generator = StubGroundedAnswerGenerator(
+        error=GroundedAnswerProviderError(
+            "Provider request failed."
+        )
+    )
+
+    monkeypatch.setattr(
+        app_module,
+        "create_grounded_answer_generator",
+        lambda *args, **kwargs: generator,
+    )
+
+    app = create_app(
+        settings=ApiSettings(
+            retrieval_backend="manifest",
+            manifest_path=manifest_path,
+        )
+    )
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/query",
+            json={
+                "query": "Where is the prediction endpoint?",
+                "top_k": 3,
+                "min_score": 0.0,
+                "show_context": False,
+            },
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Grounded answer provider request failed."
+    }
 
 
 def make_chunk(

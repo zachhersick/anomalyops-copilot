@@ -13,3 +13,9 @@ class GroundedAnswer(BaseModel):
     citations: list[Citation]
     confidence: float = Field(ge=0.0, le=1.0)
     refusal_reason: str | None = None
+    
+    
+class GroundedAnswerDraft(BaseModel):
+    answer: str
+    citation_ids: list[int]
+    refusal_reason: str | None

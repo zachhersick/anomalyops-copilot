@@ -7,15 +7,25 @@ from copilot.providers.deterministic_embeddings import (
     DeterministicEmbeddingProvider,
 )
 from copilot.providers.errors import (
-    EmbeddingProviderError,
     EmbeddingConfigurationError,
+    EmbeddingProviderError,
+    GroundedAnswerConfigurationError,
+    GroundedAnswerProviderError,
     InvalidEmbeddingResponseError,
+    InvalidGroundedAnswerResponseError,
 )
 from copilot.providers.factory import (
     create_embedding_provider,
+    create_grounded_answer_generator,
 )
 from copilot.providers.openai_embeddings import (
     OpenAIEmbeddingProvider,
+)
+from copilot.providers.deterministic_answers import (
+    DeterministicGroundedAnswerGenerator,
+)
+from copilot.providers.openai_answers import (
+    OpenAIGroundedAnswerGenerator,
 )
 
 __all__ = [
@@ -28,4 +38,10 @@ __all__ = [
     "EmbeddingProviderError",
     "EmbeddingConfigurationError",
     "InvalidEmbeddingResponseError",
+    "DeterministicGroundedAnswerGenerator",
+    "OpenAIGroundedAnswerGenerator",
+    "create_grounded_answer_generator",
+    "GroundedAnswerProviderError",
+    "GroundedAnswerConfigurationError",
+    "InvalidGroundedAnswerResponseError",
 ]
