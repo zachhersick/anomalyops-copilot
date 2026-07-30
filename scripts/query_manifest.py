@@ -1,14 +1,22 @@
 import argparse
+
 from pathlib import Path
+from dotenv import load_dotenv
 
 from copilot.answering.grounded import build_grounded_answer
 from copilot.ingestion.manifest import load_chunk_manifest
 from copilot.retrieval.search import retrieve_relevant_chunks
 from copilot.schemas.answer import GroundedAnswer
 from copilot.schemas.retrieval import ScoredChunk
+from copilot.api.settings import load_api_settings
+from copilot.providers.factory import (
+    create_grounded_answer_generator,
+)
 
 
 def main(argv: list[str] | None = None) -> int:
+    load_dotenv()
+    
     parser = argparse.ArgumentParser()
     parser.add_argument("manifest_path")
     parser.add_argument("query")
@@ -23,10 +31,16 @@ def main(argv: list[str] | None = None) -> int:
     scored_chunks = retrieve_relevant_chunks(args.query, source_chunks, args.top_k)
     
     if args.answer:
+        settings = load_api_settings()
+        grounded_answer_generator = (
+            create_grounded_answer_generator(settings)
+        )
+        
         grounded_answer = build_grounded_answer(
-            args.query,
-            scored_chunks,
-            args.min_score,
+            query=args.query,
+            scored_chunks=scored_chunks,
+            min_score=args.min_score,
+            generator=grounded_answer_generator,
         )
         
         if args.json:

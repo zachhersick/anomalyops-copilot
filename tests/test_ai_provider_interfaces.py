@@ -9,6 +9,12 @@ from copilot.schemas.answer import Citation, GroundedAnswer
 from copilot.schemas.retrieval import ScoredChunk
 from copilot.schemas.anomaly import RunSummary
 from copilot.schemas.triage import TriageReport, TriageRequest
+from copilot.providers.deterministic_answers import (
+    DeterministicGroundedAnswerGenerator,
+)
+from copilot.providers.openai_answers import (
+    OpenAIGroundedAnswerGenerator,
+)
 
 
 class FakeEmbeddingProvider:
@@ -30,6 +36,29 @@ class FakeEmbeddingProvider:
         text: str,
     ) -> list[float]:
         return [float(len(text)), 0.0, 1.0]
+    
+    
+class FakeOpenAIClient:
+    pass
+
+
+class MissingGenerateMethod:
+    provider_name = "incomplete"
+    model_name = "incomplete-model"
+
+
+class MissingProviderName:
+    model_name = "incomplete-model"
+
+    def generate(self, query, context):
+        raise NotImplementedError
+
+
+class MissingModelName:
+    provider_name = "incomplete"
+
+    def generate(self, query, context):
+        raise NotImplementedError
     
     
 class FakeGroundedAnswerGenerator:
@@ -192,3 +221,51 @@ def test_fake_tool_calling_triage_agent_returns_configured_report():
     )
 
     assert result == expected_report
+    
+    
+def test_deterministic_answer_generator_satisfies_protocol():
+    generator = DeterministicGroundedAnswerGenerator()
+
+    assert isinstance(
+        generator,
+        GroundedAnswerGenerator,
+    )
+
+
+def test_openai_answer_generator_satisfies_protocol():
+    generator = OpenAIGroundedAnswerGenerator(
+        model_name="gpt-test",
+        client=FakeOpenAIClient(),
+    )
+
+    assert isinstance(
+        generator,
+        GroundedAnswerGenerator,
+    )
+
+
+def test_object_without_generate_does_not_satisfy_answer_protocol():
+    provider = MissingGenerateMethod()
+
+    assert not isinstance(
+        provider,
+        GroundedAnswerGenerator,
+    )
+
+
+def test_object_without_provider_name_does_not_satisfy_answer_protocol():
+    provider = MissingProviderName()
+
+    assert not isinstance(
+        provider,
+        GroundedAnswerGenerator,
+    )
+
+
+def test_object_without_model_name_does_not_satisfy_answer_protocol():
+    provider = MissingModelName()
+
+    assert not isinstance(
+        provider,
+        GroundedAnswerGenerator,
+    )

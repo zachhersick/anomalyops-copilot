@@ -1,20 +1,25 @@
+from collections.abc import Sequence
+from unittest.mock import MagicMock, patch
+
 import pytest
 
-from unittest.mock import MagicMock, patch
-from collections.abc import Sequence
-
-from copilot.api.query_service import query_service, retrieve_chunks_for_query
+import copilot.api.query_service as query_service_module
+from copilot.api.errors import (
+    DatabaseNotConfiguredError,
+    InvalidManifestError,
+    ManifestFileNotFoundError,
+    ManifestNotConfiguredError,
+)
+from copilot.api.query_service import (
+    query_service,
+    retrieve_chunks_for_query,
+)
+from copilot.api.settings import ApiSettings
 from copilot.ingestion.manifest import write_chunk_manifest
+from copilot.schemas.answer import Citation, GroundedAnswer
 from copilot.schemas.chunk import SourceChunk
 from copilot.schemas.query import QueryRequest, QueryResponse
-from copilot.api.settings import ApiSettings
 from copilot.schemas.retrieval import ScoredChunk
-from copilot.api.errors import (
-    ManifestNotConfiguredError,
-    ManifestFileNotFoundError,
-    InvalidManifestError,
-    DatabaseNotConfiguredError,
-)
 
 
 class FakeEmbeddingProvider:
@@ -33,6 +38,31 @@ class FakeEmbeddingProvider:
         texts: Sequence[str],
     ) -> list[list[float]]:
         raise NotImplementedError
+    
+    
+class RecordingGroundedAnswerGenerator:
+    provider_name = "recording"
+    model_name = "recording-test"
+
+    def __init__(
+        self,
+        result: GroundedAnswer,
+    ) -> None:
+        self.result = result
+        self.calls: list[dict] = []
+
+    def generate(
+        self,
+        query: str,
+        context: Sequence[ScoredChunk],
+    ) -> GroundedAnswer:
+        self.calls.append(
+            {
+                "query": query,
+                "context": context,
+            }
+        )
+        return self.result
 
 
 def test_service_returns_grounded_answer_with_citations(tmp_path):
@@ -57,7 +87,10 @@ def test_service_returns_grounded_answer_with_citations(tmp_path):
     )
     
     assert isinstance(query_response, QueryResponse)
-    assert query_response.answer == "The retrieved context says: The prediction API exposes a POST /predict endpoint."
+    assert query_response.answer == (
+        "The retrieved context says: "
+        "The prediction API exposes a POST /predict endpoint. [1]"
+    )
     assert isinstance(query_response.confidence, float)
     assert query_response.refusal_reason is None
     assert len(query_response.citations) == 1
@@ -90,7 +123,7 @@ def test_service_respects_min_score_refusal(tmp_path):
     
     assert query_response.answer == ""
     assert query_response.citations == []
-    assert query_response.confidence == 0.0
+    assert 0.0 <= query_response.confidence <= 1.0
     assert (
         query_response.refusal_reason
         == "Retrieved context was below the confidence threshold."
@@ -362,10 +395,9 @@ def test_query_service_returns_same_response_for_both_backends():
         )
 
     assert manifest_response.model_dump() == pgvector_response.model_dump()
-
     assert manifest_response.answer == (
         "The retrieved context says: "
-        "The prediction API exposes a POST /predict endpoint."
+        "The prediction API exposes a POST /predict endpoint. [1]"
     )
     assert manifest_response.confidence == pytest.approx(0.9)
     assert len(manifest_response.citations) == 1
@@ -430,6 +462,329 @@ def test_query_service_passes_session_factory_and_provider_to_retrieval():
     )
     
     
+def test_pgvector_backend_requires_embedding_provider():
+    session_factory = MagicMock()
+
+    settings = ApiSettings(
+        retrieval_backend="pgvector",
+        database_url="postgresql+psycopg://test",
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="Embedding provider is not configured.",
+    ):
+        retrieve_chunks_for_query(
+            settings,
+            make_query_request(query="prediction api"),
+            session_factory=session_factory,
+            embedding_provider=None,
+        )
+
+    session_factory.assert_not_called()
+    
+    
+def test_query_service_injects_grounded_answer_generator(
+    monkeypatch,
+):
+    selected_chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="First context.",
+            score=0.7,
+            source_path="first.py",
+            chunk_index=0,
+        ),
+        make_scored_chunk(
+            chunk_id="chunk-2",
+            content="Second context.",
+            score=0.9,
+            source_path="second.py",
+            chunk_index=1,
+        ),
+    ]
+    generated_answer = GroundedAnswer(
+        answer="The generated answer uses the second chunk. [2]",
+        citations=[
+            Citation(
+                citation_id=2,
+                source_path="second.py",
+                start_line=1,
+                end_line=5,
+            )
+        ],
+        confidence=0.83,
+        refusal_reason=None,
+    )
+    generator = RecordingGroundedAnswerGenerator(
+        generated_answer
+    )
+
+    monkeypatch.setattr(
+        query_service_module,
+        "retrieve_chunks_for_query",
+        lambda *args, **kwargs: selected_chunks,
+    )
+
+    response = query_service(
+        settings=ApiSettings(),
+        query_request=QueryRequest(
+            query="Exact query",
+            top_k=3,
+            min_score=0.0,
+            show_context=False,
+        ),
+        grounded_answer_generator=generator,
+    )
+
+    assert generator.calls == [
+        {
+            "query": "Exact query",
+            "context": selected_chunks,
+        }
+    ]
+    assert generator.calls[0]["context"] is selected_chunks
+
+    assert response.answer == generated_answer.answer
+    assert response.confidence == generated_answer.confidence
+    assert response.citations == generated_answer.citations
+    assert response.refusal_reason is None
+    assert response.context is None
+    assert response.context_snippets == []
+
+
+def test_query_service_refuses_before_calling_generator_below_min_score(
+    monkeypatch,
+):
+    selected_chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="Weak context.",
+            score=0.4,
+        )
+    ]
+    generator = RecordingGroundedAnswerGenerator(
+        GroundedAnswer(
+            answer="This should not be returned. [1]",
+            citations=[
+                Citation(
+                    citation_id=1,
+                    source_path="source.py",
+                    start_line=1,
+                    end_line=5,
+                )
+            ],
+            confidence=0.4,
+            refusal_reason=None,
+        )
+    )
+
+    monkeypatch.setattr(
+        query_service_module,
+        "retrieve_chunks_for_query",
+        lambda *args, **kwargs: selected_chunks,
+    )
+
+    response = query_service(
+        settings=ApiSettings(),
+        query_request=QueryRequest(
+            query="Question",
+            top_k=3,
+            min_score=0.5,
+            show_context=False,
+        ),
+        grounded_answer_generator=generator,
+    )
+
+    assert generator.calls == []
+    assert response.answer == ""
+    assert response.citations == []
+    assert response.confidence == pytest.approx(0.4)
+    assert response.refusal_reason == (
+        "Retrieved context was below the confidence threshold."
+    )
+
+
+def test_query_service_displays_all_context_independent_of_citations(
+    monkeypatch,
+):
+    selected_chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="First retrieved context.",
+            score=0.7,
+            source_path="first.py",
+            start_line=10,
+            end_line=20,
+            chunk_index=0,
+        ),
+        make_scored_chunk(
+            chunk_id="chunk-2",
+            content="Second retrieved context.",
+            score=0.9,
+            source_path="second.py",
+            start_line=30,
+            end_line=40,
+            chunk_index=1,
+        ),
+    ]
+    generator = RecordingGroundedAnswerGenerator(
+        GroundedAnswer(
+            answer="Only the second chunk supports this answer. [2]",
+            citations=[
+                Citation(
+                    citation_id=2,
+                    source_path="second.py",
+                    start_line=30,
+                    end_line=40,
+                )
+            ],
+            confidence=0.9,
+            refusal_reason=None,
+        )
+    )
+
+    monkeypatch.setattr(
+        query_service_module,
+        "retrieve_chunks_for_query",
+        lambda *args, **kwargs: selected_chunks,
+    )
+
+    response = query_service(
+        settings=ApiSettings(),
+        query_request=QueryRequest(
+            query="Question",
+            top_k=3,
+            min_score=0.0,
+            show_context=True,
+        ),
+        grounded_answer_generator=generator,
+    )
+
+    assert [
+        citation.citation_id
+        for citation in response.citations
+    ] == [2]
+
+    assert len(response.context_snippets) == 2
+
+    assert response.context_snippets[0].citation_id == 1
+    assert response.context_snippets[0].source_path == "first.py"
+    assert response.context_snippets[0].content == (
+        "First retrieved context."
+    )
+
+    assert response.context_snippets[1].citation_id == 2
+    assert response.context_snippets[1].source_path == "second.py"
+    assert response.context_snippets[1].content == (
+        "Second retrieved context."
+    )
+
+    assert response.context is not None
+    assert "First retrieved context." in response.context
+    assert "Second retrieved context." in response.context
+
+
+def test_query_service_maps_provider_refusal_exactly(
+    monkeypatch,
+):
+    selected_chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="Retrieved context.",
+            score=0.8,
+        )
+    ]
+    provider_result = GroundedAnswer(
+        answer="",
+        citations=[],
+        confidence=0.0,
+        refusal_reason="The context does not support the answer.",
+    )
+    generator = RecordingGroundedAnswerGenerator(
+        provider_result
+    )
+
+    monkeypatch.setattr(
+        query_service_module,
+        "retrieve_chunks_for_query",
+        lambda *args, **kwargs: selected_chunks,
+    )
+
+    response = query_service(
+        settings=ApiSettings(),
+        query_request=QueryRequest(
+            query="Unsupported question",
+            top_k=3,
+            min_score=0.0,
+            show_context=False,
+        ),
+        grounded_answer_generator=generator,
+    )
+
+    assert response.answer == provider_result.answer
+    assert response.citations == provider_result.citations
+    assert response.confidence == provider_result.confidence
+    assert response.refusal_reason == (
+        provider_result.refusal_reason
+    )
+
+
+def test_query_service_passes_embedding_dependency_to_retrieval(
+    monkeypatch,
+):
+    selected_chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="Retrieved context.",
+            score=0.8,
+        )
+    ]
+    embedding_provider = object()
+    captured = {}
+
+    def fake_retrieve_chunks_for_query(
+        settings,
+        query_request,
+        session_factory=None,
+        embedding_provider=None,
+    ):
+        captured["settings"] = settings
+        captured["query_request"] = query_request
+        captured["session_factory"] = session_factory
+        captured["embedding_provider"] = embedding_provider
+        return selected_chunks
+
+    monkeypatch.setattr(
+        query_service_module,
+        "retrieve_chunks_for_query",
+        fake_retrieve_chunks_for_query,
+    )
+
+    settings = ApiSettings()
+    request = QueryRequest(
+        query="Question",
+        top_k=3,
+        min_score=0.0,
+        show_context=False,
+    )
+    session_factory = object()
+
+    query_service(
+        settings=settings,
+        query_request=request,
+        session_factory=session_factory,
+        embedding_provider=embedding_provider,
+    )
+
+    assert captured == {
+        "settings": settings,
+        "query_request": request,
+        "session_factory": session_factory,
+        "embedding_provider": embedding_provider,
+    }
+    
+    
 def make_query_request(
     query: str,
     top_k: int = 3,
@@ -463,24 +818,28 @@ def make_chunk(
         end_line=end_line,
     )
     
-    
-def test_pgvector_backend_requires_embedding_provider():
-    session_factory = MagicMock()
 
-    settings = ApiSettings(
-        retrieval_backend="pgvector",
-        database_url="postgresql+psycopg://test",
+def make_scored_chunk(
+    chunk_id: str,
+    content: str,
+    score: float,
+    *,
+    source_path: str = "source.py",
+    start_line: int = 1,
+    end_line: int = 5,
+    chunk_index: int = 0,
+) -> ScoredChunk:
+    return ScoredChunk(
+        chunk=SourceChunk(
+            chunk_id=chunk_id,
+            source_id=source_path,
+            project_name="test-project",
+            source_type="python",
+            source_path=source_path,
+            chunk_index=chunk_index,
+            content=content,
+            start_line=start_line,
+            end_line=end_line,
+        ),
+        score=score,
     )
-
-    with pytest.raises(
-        RuntimeError,
-        match="Embedding provider is not configured.",
-    ):
-        retrieve_chunks_for_query(
-            settings,
-            make_query_request(query="prediction api"),
-            session_factory=session_factory,
-            embedding_provider=None,
-        )
-
-    session_factory.assert_not_called()

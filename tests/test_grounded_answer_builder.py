@@ -1,151 +1,330 @@
+import pytest
+
 from copilot.answering.grounded import build_grounded_answer
-from copilot.schemas.retrieval import ScoredChunk
-from copilot.schemas.answer import GroundedAnswer, Citation
+from copilot.schemas.answer import Citation, GroundedAnswer
 from copilot.schemas.chunk import SourceChunk
+from copilot.schemas.retrieval import ScoredChunk
 
 
-def test_build_grounded_answer_builds_answer_with_citations():
-    scored_chunks  = [
-        make_scored_chunk(chunk_id="chunk-1"),
-        make_scored_chunk(chunk_id="chunk-2"),
-    ]
-    query = "text"
-    grounded_answer = build_grounded_answer(query, scored_chunks)
-    
-    assert isinstance(grounded_answer, GroundedAnswer)
-    assert len(grounded_answer.citations) == 2
-    assert all(isinstance(citation, Citation) for citation in grounded_answer.citations)
-    
-    
-def test_build_grounded_answer_mentions_retrieved_context_exists():
-    scored_chunks  = [
-        make_scored_chunk(chunk_id="chunk-1"),
-        make_scored_chunk(chunk_id="chunk-2"),
-    ]
-    query = "text"
-    grounded_answer = build_grounded_answer(query, scored_chunks)
-    
-    assert "The retrieved context says" in grounded_answer.answer
-    
-    
-def test_build_grounded_answer_confidence_comes_from_top_score():
-    scored_chunks  = [
-        make_scored_chunk(
-            chunk_id="chunk-1",
-            source_path="source.py",
-            start_line=1,
-            end_line=2,
-            score=0.75
-        ),
-        make_scored_chunk(
-            chunk_id="chunk-2",
-            source_path="source.py",
-            start_line=1,
-            end_line=2,
-            score=0.90
-        ),
-    ]
-    query = "text"
-    grounded_answer = build_grounded_answer(query, scored_chunks)
-    
-    assert grounded_answer.confidence == 0.90
-    
-    
-def test_build_grounded_answer_clamps_confidence_greater_than_one_to_one():
-    scored_chunks  = [
-        make_scored_chunk(score=1.10),
-    ]
-    query = "text"
-    grounded_answer = build_grounded_answer(query, scored_chunks)
-    
-    assert grounded_answer.confidence == 1.0
-    
-    
-def test_build_grounded_answer_clamps_negative_confidence_to_zero():
-    scored_chunks = [
-        make_scored_chunk(score=-0.25),
-    ]
+class RecordingGroundedAnswerGenerator:
+    provider_name = "recording"
+    model_name = "recording-test"
 
-    grounded_answer = build_grounded_answer("text", scored_chunks)
+    def __init__(
+        self,
+        result: GroundedAnswer,
+    ) -> None:
+        self.result = result
+        self.calls: list[dict] = []
 
-    assert grounded_answer.confidence == 0.0
-    
-    
-def test_build_grounded_answer_refuses_when_no_scored_chunks_exist():
-    grounded_answer = build_grounded_answer("text", [])
-    
-    assert grounded_answer.answer == ""
-    assert grounded_answer.citations == []
-    assert grounded_answer.confidence == 0.0
-    assert grounded_answer.refusal_reason == "No relevant context was retrieved."
-    
-    
-def test_build_grounded_answer_refuses_top_score_less_than_min_score():
-    grounded_answer = build_grounded_answer("text", [make_scored_chunk(score=0.25)], 0.5)
-    
-    assert grounded_answer.answer == ""
-    assert grounded_answer.citations == []
-    assert grounded_answer.confidence == 0.0
-    assert (
-        grounded_answer.refusal_reason
-        == "Retrieved context was below the confidence threshold."
-    )
-    
-    
-def test_build_grounded_answer_accepts_top_score_greater_than_or_equal_to_min_score():
-    grounded_answer = build_grounded_answer(
-        "text",
-        [make_scored_chunk(score=0.75)],
-        min_score=0.5,
-    )
-
-    assert grounded_answer.answer == "The retrieved context says: chunk content"
-    assert grounded_answer.refusal_reason is None
-    
-    
-def test_build_grounded_answer_returns_deterministic_answer():
-    scored_chunks  = [
-        make_scored_chunk(
-            chunk_id="chunk-1",
-            source_path="source.py",
-            start_line=1,
-            end_line=2,
-            score=0.90,
-        ),
-        make_scored_chunk(
-            chunk_id="chunk-2",
-            source_path="source.py",
-            start_line=3,
-            end_line=4,
-            score=0.5,
+    def generate(
+        self,
+        query: str,
+        context: list[ScoredChunk],
+    ) -> GroundedAnswer:
+        self.calls.append(
+            {
+                "query": query,
+                "context": context,
+            }
         )
-    ]
-    query = "chunk"
-    grounded_answer = build_grounded_answer(query, scored_chunks)
-    
-    assert grounded_answer.answer == "The retrieved context says: chunk content"
-    
-    
+        return self.result
+
+
 def make_scored_chunk(
-    chunk_id: str = "chunk-1",
+    chunk_id: str,
+    content: str,
+    score: float,
+    *,
     source_path: str = "source.py",
     start_line: int = 1,
-    end_line: int = 2,
-    score: float = 0.75,
+    end_line: int = 5,
+    chunk_index: int = 0,
 ) -> ScoredChunk:
-    source_chunk = SourceChunk(
-        chunk_id=chunk_id,
-        source_id=source_path,
-        project_name="test-project",
-        source_type="python",
-        source_path=source_path,
-        chunk_index=0,
-        content="chunk content",
-        start_line=start_line,
-        end_line=end_line,
-    )
-
     return ScoredChunk(
-        chunk=source_chunk,
+        chunk=SourceChunk(
+            chunk_id=chunk_id,
+            source_id=source_path,
+            project_name="test-project",
+            source_type="python",
+            source_path=source_path,
+            chunk_index=chunk_index,
+            content=content,
+            start_line=start_line,
+            end_line=end_line,
+        ),
         score=score,
     )
+
+
+def make_generated_answer() -> GroundedAnswer:
+    return GroundedAnswer(
+        answer="Generated answer. [2]",
+        citations=[
+            Citation(
+                citation_id=2,
+                source_path="second.py",
+                start_line=20,
+                end_line=30,
+            )
+        ],
+        confidence=0.87,
+        refusal_reason=None,
+    )
+
+
+def test_build_grounded_answer_refuses_when_context_is_empty():
+    generator = RecordingGroundedAnswerGenerator(
+        make_generated_answer()
+    )
+
+    result = build_grounded_answer(
+        query="Where is the endpoint?",
+        scored_chunks=[],
+        min_score=0.0,
+        generator=generator,
+    )
+
+    assert result == GroundedAnswer(
+        answer="",
+        citations=[],
+        confidence=0.0,
+        refusal_reason="No relevant context was retrieved.",
+    )
+    assert generator.calls == []
+
+
+def test_build_grounded_answer_refuses_below_minimum_score():
+    generator = RecordingGroundedAnswerGenerator(
+        make_generated_answer()
+    )
+    chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="Some context.",
+            score=0.49,
+        ),
+    ]
+
+    result = build_grounded_answer(
+        query="Question",
+        scored_chunks=chunks,
+        min_score=0.5,
+        generator=generator,
+    )
+
+    assert result == GroundedAnswer(
+        answer="",
+        citations=[],
+        confidence=0.49,
+        refusal_reason=(
+            "Retrieved context was below the confidence threshold."
+        ),
+    )
+    assert generator.calls == []
+
+
+def test_build_grounded_answer_uses_highest_score_for_threshold():
+    generator = RecordingGroundedAnswerGenerator(
+        make_generated_answer()
+    )
+    chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="Low-scoring context.",
+            score=0.2,
+        ),
+        make_scored_chunk(
+            chunk_id="chunk-2",
+            content="High-scoring context.",
+            score=0.8,
+        ),
+    ]
+
+    result = build_grounded_answer(
+        query="Question",
+        scored_chunks=chunks,
+        min_score=0.5,
+        generator=generator,
+    )
+
+    assert result is generator.result
+    assert len(generator.calls) == 1
+
+
+def test_build_grounded_answer_allows_score_equal_to_threshold():
+    generator = RecordingGroundedAnswerGenerator(
+        make_generated_answer()
+    )
+    chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="Supporting context.",
+            score=0.5,
+        ),
+    ]
+
+    result = build_grounded_answer(
+        query="Question",
+        scored_chunks=chunks,
+        min_score=0.5,
+        generator=generator,
+    )
+
+    assert result is generator.result
+    assert len(generator.calls) == 1
+
+
+@pytest.mark.parametrize(
+    ("score", "expected_confidence"),
+    [
+        (1.4, 1.0),
+        (-0.4, 0.0),
+    ],
+)
+def test_build_grounded_answer_clamps_refusal_confidence(
+    score,
+    expected_confidence,
+):
+    generator = RecordingGroundedAnswerGenerator(
+        make_generated_answer()
+    )
+    chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="Context.",
+            score=score,
+        ),
+    ]
+
+    min_score = 2.0 if score > 0 else 0.5
+
+    result = build_grounded_answer(
+        query="Question",
+        scored_chunks=chunks,
+        min_score=min_score,
+        generator=generator,
+    )
+
+    assert result.confidence == expected_confidence
+    assert result.refusal_reason == (
+        "Retrieved context was below the confidence threshold."
+    )
+    assert generator.calls == []
+
+
+def test_build_grounded_answer_passes_query_and_context_unchanged():
+    generated_answer = make_generated_answer()
+    generator = RecordingGroundedAnswerGenerator(
+        generated_answer
+    )
+    chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="First context.",
+            score=0.7,
+            source_path="first.py",
+            chunk_index=0,
+        ),
+        make_scored_chunk(
+            chunk_id="chunk-2",
+            content="Second context.",
+            score=0.9,
+            source_path="second.py",
+            chunk_index=1,
+        ),
+    ]
+
+    result = build_grounded_answer(
+        query="Exact query text",
+        scored_chunks=chunks,
+        min_score=0.5,
+        generator=generator,
+    )
+
+    assert result is generated_answer
+    assert generator.calls == [
+        {
+            "query": "Exact query text",
+            "context": chunks,
+        }
+    ]
+    assert generator.calls[0]["context"] is chunks
+
+
+def test_build_grounded_answer_returns_generator_result_unchanged():
+    generated_answer = GroundedAnswer(
+        answer="Provider-specific answer. [1]",
+        citations=[
+            Citation(
+                citation_id=1,
+                source_path="provider.py",
+                start_line=40,
+                end_line=50,
+            )
+        ],
+        confidence=0.31,
+        refusal_reason=None,
+    )
+    generator = RecordingGroundedAnswerGenerator(
+        generated_answer
+    )
+    chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="Supporting context.",
+            score=0.95,
+        ),
+    ]
+
+    result = build_grounded_answer(
+        query="Question",
+        scored_chunks=chunks,
+        generator=generator,
+    )
+
+    assert result is generated_answer
+    assert result.confidence == 0.31
+    assert result.citations[0].source_path == "provider.py"
+
+
+def test_build_grounded_answer_uses_default_deterministic_generator():
+    chunks = [
+        make_scored_chunk(
+            chunk_id="chunk-1",
+            content="Lower-scoring context.",
+            score=0.4,
+            source_path="first.py",
+            chunk_index=0,
+        ),
+        make_scored_chunk(
+            chunk_id="chunk-2",
+            content="The endpoint is POST /predict.",
+            score=0.9,
+            source_path="api.py",
+            start_line=10,
+            end_line=20,
+            chunk_index=1,
+        ),
+    ]
+
+    result = build_grounded_answer(
+        query="Where is the endpoint?",
+        scored_chunks=chunks,
+        min_score=0.0,
+    )
+
+    assert result.answer == (
+        "The retrieved context says: "
+        "The endpoint is POST /predict. [2]"
+    )
+    assert result.confidence == pytest.approx(0.9)
+    assert result.refusal_reason is None
+    assert len(result.citations) == 1
+
+    citation = result.citations[0]
+
+    assert citation.citation_id == 2
+    assert citation.source_path == "api.py"
+    assert citation.start_line == 10
+    assert citation.end_line == 20

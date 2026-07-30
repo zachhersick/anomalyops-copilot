@@ -14,16 +14,21 @@ from copilot.api.errors import DatabaseNotConfiguredError
 from copilot.api.errors import (
     ManifestNotConfiguredError,
     ManifestFileNotFoundError,
-    InvalidManifestError
+    InvalidManifestError,
 )
-from copilot.providers.interfaces import EmbeddingProvider
+from copilot.providers.interfaces import (
+    EmbeddingProvider,
+    GroundedAnswerGenerator,
+)
 
 
 def query_service(
     settings: ApiSettings,
     query_request: QueryRequest,
     session_factory: sessionmaker[Session] | None = None,
+    *,
     embedding_provider: EmbeddingProvider | None = None,
+    grounded_answer_generator: GroundedAnswerGenerator | None = None,
 ) -> QueryResponse:
     selected_chunks = retrieve_chunks_for_query(
         settings,
@@ -36,6 +41,7 @@ def query_service(
         query=query_request.query,
         scored_chunks=selected_chunks,
         min_score=query_request.min_score,
+        generator=grounded_answer_generator,
     )
     
     context_snippets = []
@@ -71,7 +77,7 @@ def retrieve_chunks_for_query(
     settings: ApiSettings,
     query_request: QueryRequest,
     session_factory: sessionmaker[Session] | None = None,
-    embedding_provider: EmbeddingProvider | None = None
+    embedding_provider: EmbeddingProvider | None = None,
 ) -> list[ScoredChunk]:
     retrieval_backend = settings.retrieval_backend
     
@@ -111,5 +117,5 @@ def retrieve_chunks_for_query(
             session=session,
             query=query_request.query,
             embedding_provider=embedding_provider,
-            top_k=query_request.top_k
+            top_k=query_request.top_k,
         )

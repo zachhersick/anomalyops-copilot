@@ -27,13 +27,20 @@ from copilot.services.triage import (
 )
 from copilot.tools.anomaly import AnomalyOperationalTools
 from copilot.clients.anomaly_api import AnomalyApiClient
-from copilot.providers.factory import create_embedding_provider
+from copilot.providers.factory import (
+    create_embedding_provider,
+    create_grounded_answer_generator,
+)
+from copilot.providers.errors import (
+    GroundedAnswerProviderError,
+    InvalidGroundedAnswerResponseError,
+)
 
 
 def create_app(
     settings: ApiSettings | None = None,
     anomaly_transport: httpx.BaseTransport | None = None,
-    openai_client: OpenAI | None = None
+    openai_client: OpenAI | None = None,
 ) -> FastAPI:
     app = FastAPI(
         title="AnomalyOps-Copilot API",
@@ -50,6 +57,7 @@ def create_app(
     app.state.anomaly_tools = None
     app.state.triage_service = None
     app.state.embedding_provider = None
+    app.state.grounded_answer_generator = None
     
     if (
         resolved_settings.retrieval_backend == "pgvector"
@@ -78,6 +86,11 @@ def create_app(
             app.state.anomaly_tools
         )
         
+    app.state.grounded_answer_generator = create_grounded_answer_generator(
+        resolved_settings,
+        openai_client=openai_client,
+    )
+        
 
     @app.get("/health")
     def health_check():
@@ -87,7 +100,7 @@ def create_app(
     @app.post("/query", response_model=QueryResponse)
     def query(request: Request, query_request: QueryRequest) -> QueryResponse:
         settings = request.app.state.settings
-        embedding_provider=request.app.state.embedding_provider
+        embedding_provider = request.app.state.embedding_provider
         
         try:
             query_response = query_service(
@@ -95,6 +108,7 @@ def create_app(
                 query_request,
                 session_factory=request.app.state.session_factory,
                 embedding_provider=embedding_provider,
+                grounded_answer_generator=request.app.state.grounded_answer_generator,
             )
         except ManifestNotConfiguredError:
             raise HTTPException(
@@ -116,6 +130,18 @@ def create_app(
                 status_code=500,
                 detail="Database URL is not configured."
             )
+        except InvalidGroundedAnswerResponseError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=(
+                    "Grounded answer provider returned an invalid response."
+                ),
+            ) from exc
+        except GroundedAnswerProviderError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Grounded answer provider request failed.",
+            ) from exc
             
         return query_response
     
