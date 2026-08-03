@@ -35,6 +35,7 @@ from copilot.tools.anomaly import (
     OperationalResourceNotFoundError,
     OperationalToolError,
 )
+from copilot.observability import trace_span
 
 
 DEVELOPER_INSTRUCTIONS = (
@@ -774,14 +775,21 @@ class OpenAITriageAgent:
 
         while True:
             try:
-                response = self._client.responses.parse(
+                with trace_span(
+                    "provider.request",
+                    provider=self.provider_name,
                     model=self.model_name,
-                    instructions=DEVELOPER_INSTRUCTIONS,
-                    input=input_items,
-                    tools=self._tool_definitions(),
-                    text_format=TriageReportDraft,
-                    parallel_tool_calls=False,
-                )
+                    operation="triage",
+                    tool_round=tool_rounds + 1,
+                ):
+                    response = self._client.responses.parse(
+                        model=self.model_name,
+                        instructions=DEVELOPER_INSTRUCTIONS,
+                        input=input_items,
+                        tools=self._tool_definitions(),
+                        text_format=TriageReportDraft,
+                        parallel_tool_calls=False,
+                    )
             except OpenAIError as exc:
                 raise TriageAgentProviderError(
                     "Triage agent provider returned an error."
@@ -833,11 +841,17 @@ class OpenAITriageAgent:
                 )
 
                 for tool_call in function_calls:
-                    output = self._execute_tool_call(
-                        tool_call,
-                        request,
-                        state,
-                    )
+                    with trace_span(
+                        "triage.tool",
+                        provider=self.provider_name,
+                        model=self.model_name,
+                        tool_name=tool_call.name,
+                    ):
+                        output = self._execute_tool_call(
+                            tool_call,
+                            request,
+                            state,
+                        )
 
                     input_items.append(
                         {

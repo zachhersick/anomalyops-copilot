@@ -2,6 +2,7 @@ import httpx
 
 from fastapi import FastAPI, HTTPException, Request
 from openai import OpenAI
+from time import perf_counter
 
 from copilot.schemas.query import QueryRequest, QueryResponse
 from copilot.api.settings import ApiSettings, load_api_settings
@@ -34,6 +35,13 @@ from copilot.providers.errors import (
     TriageAgentProviderError,
     TriageAgentResourceNotFoundError,
     TriageAgentToolError,
+)
+from copilot.observability import (
+    emit_trace,
+    reset_request_id,
+    resolve_request_id,
+    set_request_id,
+    trace_span,
 )
 
 
@@ -92,6 +100,72 @@ def create_app(
         resolved_settings,
         openai_client=openai_client,
     )
+    
+    
+    @app.middleware("http")
+    async def trace_http_request(
+        request: Request,
+        call_next,
+    ):
+        request_id = resolve_request_id(
+            request.headers.get("X-Request-ID")
+        )
+        request_id_token = set_request_id(
+            request_id
+        )
+        request.state.request_id = request_id
+
+        started_at = perf_counter()
+
+        try:
+            response = await call_next(request)
+        except Exception as exc:
+            emit_trace(
+                "http.request",
+                method=request.method,
+                path=request.url.path,
+                status="error",
+                duration_ms=round(
+                    (
+                        perf_counter()
+                        - started_at
+                    )
+                    * 1000,
+                    3,
+                ),
+                error_type=type(exc).__name__,
+            )
+            raise
+        else:
+            emit_trace(
+                "http.request",
+                method=request.method,
+                path=request.url.path,
+                status=(
+                    "ok"
+                    if response.status_code < 400
+                    else "error"
+                ),
+                status_code=response.status_code,
+                duration_ms=round(
+                    (
+                        perf_counter()
+                        - started_at
+                    )
+                    * 1000,
+                    3,
+                ),
+            )
+
+            response.headers["X-Request-ID"] = (
+                request_id
+            )
+
+            return response
+        finally:
+            reset_request_id(
+                request_id_token
+            )
         
 
     @app.get("/health")
@@ -162,7 +236,14 @@ def create_app(
             )
 
         try:
-            return agent.triage(triage_request)
+            with trace_span(
+            "triage.agent",
+            provider=agent.provider_name,
+            model=agent.model_name,
+            max_events=triage_request.max_events,
+            explicit_run=triage_request.run_id is not None,
+            ):
+                return agent.triage(triage_request)
         except TriageAgentResourceNotFoundError as exc:
             raise HTTPException(
                 status_code=404,
