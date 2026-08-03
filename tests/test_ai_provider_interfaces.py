@@ -1,3 +1,14 @@
+from unittest.mock import Mock
+
+from copilot.providers.deterministic_triage import (
+    DeterministicTriageAgent,
+)
+from copilot.providers.openai_triage import (
+    OpenAITriageAgent,
+)
+from copilot.tools.anomaly import (
+    AnomalyOperationalTools,
+)
 from collections.abc import Sequence
 
 from copilot.providers.interfaces import (
@@ -88,6 +99,25 @@ class FakeToolCallingTriageAgent:
         request: TriageRequest,
     ) -> TriageReport:
         return self._report
+    
+    
+class MissingTriageMethod:
+    provider_name = "incomplete"
+    model_name = "incomplete-model"
+
+
+class MissingTriageProviderName:
+    model_name = "incomplete-model"
+
+    def triage(self, request):
+        raise NotImplementedError
+
+
+class MissingTriageModelName:
+    provider_name = "incomplete"
+
+    def triage(self, request):
+        raise NotImplementedError
 
 
 def test_fake_embedding_provider_satisfies_protocol():
@@ -268,4 +298,63 @@ def test_object_without_model_name_does_not_satisfy_answer_protocol():
     assert not isinstance(
         provider,
         GroundedAnswerGenerator,
+    )
+    
+    
+def test_deterministic_triage_agent_satisfies_protocol():
+    tools = Mock(
+        spec=AnomalyOperationalTools
+    )
+
+    agent = DeterministicTriageAgent(
+        tools
+    )
+
+    assert isinstance(
+        agent,
+        ToolCallingTriageAgent,
+    )
+
+
+def test_openai_triage_agent_satisfies_protocol():
+    tools = Mock(
+        spec=AnomalyOperationalTools
+    )
+
+    agent = OpenAITriageAgent(
+        model_name="gpt-test",
+        client=FakeOpenAIClient(),
+        tools=tools,
+    )
+
+    assert isinstance(
+        agent,
+        ToolCallingTriageAgent,
+    )
+
+
+def test_object_without_triage_does_not_satisfy_triage_protocol():
+    agent = MissingTriageMethod()
+
+    assert not isinstance(
+        agent,
+        ToolCallingTriageAgent,
+    )
+
+
+def test_triage_agent_without_provider_name_does_not_satisfy_protocol():
+    agent = MissingTriageProviderName()
+
+    assert not isinstance(
+        agent,
+        ToolCallingTriageAgent,
+    )
+
+
+def test_triage_agent_without_model_name_does_not_satisfy_protocol():
+    agent = MissingTriageModelName()
+
+    assert not isinstance(
+        agent,
+        ToolCallingTriageAgent,
     )

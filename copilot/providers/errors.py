@@ -19,3 +19,27 @@ class GroundedAnswerConfigurationError(GroundedAnswerProviderError):
     
 class InvalidGroundedAnswerResponseError(GroundedAnswerProviderError):
     """Raised when a grounded answer provider returns malformed embedding data."""
+    
+    
+class TriageAgentError(RuntimeError):
+    pass
+
+
+class TriageAgentConfigurationError(TriageAgentError):
+    pass
+
+
+class TriageAgentProviderError(TriageAgentError):
+    pass
+
+
+class InvalidTriageAgentResponseError(TriageAgentProviderError):
+    pass
+
+
+class TriageAgentToolError(TriageAgentError):
+    pass
+
+
+class TriageAgentResourceNotFoundError(TriageAgentToolError):
+    pass
