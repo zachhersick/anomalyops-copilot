@@ -20,20 +20,20 @@ from copilot.schemas.triage import (
     TriageRequest,
     TriageReport,
 )
-from copilot.services.triage import (
-    TriageService,
-    TriageRunNotFoundError,
-    TriageServiceError,
-)
 from copilot.tools.anomaly import AnomalyOperationalTools
 from copilot.clients.anomaly_api import AnomalyApiClient
 from copilot.providers.factory import (
     create_embedding_provider,
     create_grounded_answer_generator,
+    create_triage_agent,
 )
 from copilot.providers.errors import (
     GroundedAnswerProviderError,
     InvalidGroundedAnswerResponseError,
+    InvalidTriageAgentResponseError,
+    TriageAgentProviderError,
+    TriageAgentResourceNotFoundError,
+    TriageAgentToolError,
 )
 
 
@@ -55,7 +55,7 @@ def create_app(
     app.state.session_factory = None
     app.state.anomaly_client = None
     app.state.anomaly_tools = None
-    app.state.triage_service = None
+    app.state.triage_agent = None
     app.state.embedding_provider = None
     app.state.grounded_answer_generator = None
     
@@ -82,8 +82,10 @@ def create_app(
         
         app.state.anomaly_client = anomaly_client
         app.state.anomaly_tools = anomaly_tools
-        app.state.triage_service = TriageService(
-            app.state.anomaly_tools
+        app.state.triage_agent = create_triage_agent(
+            resolved_settings,
+            anomaly_tools,
+            openai_client=openai_client,
         )
         
     app.state.grounded_answer_generator = create_grounded_answer_generator(
@@ -147,29 +149,40 @@ def create_app(
     
     
     @app.post("/triage", response_model=TriageReport)
-    def post_triage_report(request: Request, triage_request: TriageRequest) -> TriageReport:
-        service = request.app.state.triage_service
-        
-        if service is None:
+    def post_triage_report(
+        request: Request,
+        triage_request: TriageRequest,
+    ) -> TriageReport:
+        agent = request.app.state.triage_agent
+
+        if agent is None:
             raise HTTPException(
                 status_code=500,
-                detail="Anomaly API base URL is not configured."
+                detail="Anomaly API base URL is not configured.",
             )
-            
+
         try:
-            report = service.triage(request=triage_request)
-        except TriageRunNotFoundError as exc:
+            return agent.triage(triage_request)
+        except TriageAgentResourceNotFoundError as exc:
             raise HTTPException(
                 status_code=404,
                 detail="The requested run was not found.",
             ) from exc
-        except TriageServiceError as exc:
+        except InvalidTriageAgentResponseError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Triage agent returned an invalid response.",
+            ) from exc
+        except TriageAgentToolError as exc:
             raise HTTPException(
                 status_code=502,
                 detail="Anomaly API request failed.",
             ) from exc
-            
-        return report
+        except TriageAgentProviderError as exc:
+            raise HTTPException(
+                status_code=502,
+                detail="Triage agent request failed.",
+            ) from exc
     
     
     @app.on_event("shutdown")
