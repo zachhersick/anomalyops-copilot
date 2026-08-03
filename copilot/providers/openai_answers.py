@@ -11,6 +11,7 @@ from copilot.providers.errors import (
     GroundedAnswerProviderError,
     InvalidGroundedAnswerResponseError,
 )
+from copilot.observability import trace_span
 
 
 DEVELOPER_INSTRUCTIONS = (
@@ -148,11 +149,18 @@ class OpenAIGroundedAnswerGenerator:
         ]
         
         try:
-            response = self._client.responses.parse(
+            with trace_span(
+                "provider.request",
+                provider=self.provider_name,
                 model=self.model_name,
-                input=input_messages,
-                text_format=GroundedAnswerDraft,
-            )
+                operation="grounded_answer",
+                context_count=len(context),
+            ):
+                response = self._client.responses.parse(
+                    model=self.model_name,
+                    input=input_messages,
+                    text_format=GroundedAnswerDraft,
+                )
         except OpenAIError as exc:
             raise GroundedAnswerProviderError(
                 "Grounded answer provider returned an error."
