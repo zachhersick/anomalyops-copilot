@@ -1,4 +1,17 @@
 services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: anomalyops-copilot-api
+    environment:
+      ANOMALYOPS_RETRIEVAL_BACKEND: manifest
+      ANOMALYOPS_MANIFEST_PATH: /app/outputs/chunks.json
+      ANOMALYOPS_AI_PROVIDER: deterministic
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
   postgres:
     image: pgvector/pgvector:pg16
     container_name: anomalyops-postgres
@@ -10,6 +23,7 @@ services:
       - "5432:5432"
     volumes:
       - anomalyops_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
 
 volumes:
   anomalyops_postgres_data:
