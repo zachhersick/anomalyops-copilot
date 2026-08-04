@@ -13,6 +13,16 @@ from copilot.schemas.retrieval import ScoredChunk
 from scripts.query_manifest import main
 
 
+@pytest.fixture(autouse=True)
+def use_deterministic_answer_provider(
+    monkeypatch,
+):
+    monkeypatch.setenv(
+        "ANOMALYOPS_AI_PROVIDER",
+        "deterministic",
+    )
+
+
 class RecordingGroundedAnswerGenerator:
     provider_name = "recording"
     model_name = "recording-test"
