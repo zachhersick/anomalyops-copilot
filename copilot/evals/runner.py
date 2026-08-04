@@ -13,11 +13,20 @@ from copilot.evals.schemas import (
     RagEvalCase,
     RagEvalReport,
     RagEvalResult,
+    TriageEvalCase,
+    TriageEvalReport,
+    TriageEvalResult,
+    TriageEvalExpectedFinding,
 )
 from copilot.schemas.chunk import SourceChunk
 from copilot.schemas.query import (
     QueryRequest,
     QueryResponse,
+)
+from copilot.schemas.triage import (
+    TriageFinding,
+    TriageReport,
+    TriageRequest,
 )
 
 
@@ -479,6 +488,527 @@ def run_rag_evals(
         pass_rate=rate(
             passed_cases,
             total_cases,
+        ),
+        results=results,
+    )
+    
+    
+TriageExecutor = Callable[
+    [TriageRequest],
+    TriageReport | dict[str, object],
+]
+
+
+def load_triage_cases(
+    fixture_path: Path,
+) -> list[TriageEvalCase]:
+    raw_cases = json.loads(
+        fixture_path.read_text(
+            encoding="utf-8",
+        )
+    )
+
+    return [
+        TriageEvalCase.model_validate(case)
+        for case in raw_cases
+    ]
+
+
+def _finding_matches_expected(
+    finding: TriageFinding,
+    expected: TriageEvalExpectedFinding,
+) -> bool:
+    if (
+        finding.severity.lower()
+        != expected.severity.lower()
+    ):
+        return False
+
+    if finding.machine_id != expected.machine_id:
+        return False
+
+    if finding.sensor != expected.sensor:
+        return False
+
+    if (
+        expected.anomaly_type is not None
+        and finding.anomaly_type
+        != expected.anomaly_type
+    ):
+        return False
+
+    return True
+
+
+def _expected_findings_present(
+    report: TriageReport,
+    expected_findings: list[
+        TriageEvalExpectedFinding
+    ],
+) -> bool:
+    unmatched_indices = set(
+        range(len(report.findings))
+    )
+
+    for expected in expected_findings:
+        matched_index = next(
+            (
+                index
+                for index in unmatched_indices
+                if _finding_matches_expected(
+                    report.findings[index],
+                    expected,
+                )
+            ),
+            None,
+        )
+
+        if matched_index is None:
+            return False
+
+        unmatched_indices.remove(
+            matched_index
+        )
+
+    return True
+
+
+def _run_is_consistent(
+    report: TriageReport,
+) -> bool:
+    if (
+        report.run_summary is not None
+        and report.run_id
+        != report.run_summary.run_id
+    ):
+        return False
+
+    for evidence in report.evidence:
+        if (
+            report.run_id is not None
+            and evidence.event.run_id
+            != report.run_id
+        ):
+            return False
+
+        for alert in evidence.alerts:
+            if (
+                alert.run_id
+                != evidence.event.run_id
+            ):
+                return False
+
+    return True
+
+
+def _evidence_is_valid(
+    report: TriageReport,
+) -> bool:
+    finding_ids = [
+        finding.finding_id
+        for finding in report.findings
+    ]
+
+    if len(finding_ids) != len(
+        set(finding_ids)
+    ):
+        return False
+
+    evidence_ids = [
+        evidence.evidence_id
+        for evidence in report.evidence
+    ]
+
+    if len(evidence_ids) != len(
+        set(evidence_ids)
+    ):
+        return False
+
+    evidence_by_id = {
+        evidence.evidence_id: evidence
+        for evidence in report.evidence
+    }
+
+    for finding in report.findings:
+        if not finding.evidence_ids:
+            return False
+
+        if len(finding.evidence_ids) != len(
+            set(finding.evidence_ids)
+        ):
+            return False
+
+        for evidence_id in (
+            finding.evidence_ids
+        ):
+            evidence = evidence_by_id.get(
+                evidence_id
+            )
+
+            if evidence is None:
+                return False
+
+            event = evidence.event
+
+            if (
+                finding.machine_id
+                != event.machine_id
+            ):
+                return False
+
+            if finding.sensor != event.sensor:
+                return False
+
+            if (
+                finding.anomaly_type
+                != event.anomaly_type
+            ):
+                return False
+
+            if (
+                event.max_severity is not None
+                and finding.severity.lower()
+                != event.max_severity.lower()
+            ):
+                return False
+
+            for alert in evidence.alerts:
+                if (
+                    alert.machine_id
+                    != event.machine_id
+                ):
+                    return False
+
+                if alert.sensor != event.sensor:
+                    return False
+
+                if (
+                    alert.anomaly_type is not None
+                    and event.anomaly_type
+                    is not None
+                    and alert.anomaly_type
+                    != event.anomaly_type
+                ):
+                    return False
+
+    return True
+
+
+def _status_semantics_are_valid(
+    report: TriageReport,
+) -> bool:
+    if report.status == "completed":
+        return (
+            report.run_id is not None
+            and report.run_summary is not None
+            and bool(report.findings)
+            and report.refusal_reason is None
+        )
+
+    if report.status == "no_alerts":
+        return (
+            report.run_id is not None
+            and report.run_summary is not None
+            and report.run_summary.total_alert_events
+            == 0
+            and report.findings == []
+            and report.evidence == []
+            and report.refusal_reason is None
+        )
+
+    if report.status == "incomplete_data":
+        return bool(
+            report.refusal_reason
+            and report.refusal_reason.strip()
+        )
+
+    if report.status == "refused":
+        return (
+            bool(
+                report.refusal_reason
+                and report.refusal_reason.strip()
+            )
+            and report.findings == []
+        )
+
+    return False
+
+
+def _invalid_triage_result(
+    case: TriageEvalCase,
+    reason: str,
+) -> TriageEvalResult:
+    return TriageEvalResult(
+        case_id=case.case_id,
+        status="invalid",
+        schema_valid=False,
+        status_correct=(
+            False
+            if case.expected_status
+            is not None
+            else None
+        ),
+        finding_count_correct=(
+            False
+            if case.expected_finding_count
+            is not None
+            else None
+        ),
+        expected_findings_present=(
+            False
+            if case.expected_findings
+            else None
+        ),
+        evidence_valid=False,
+        run_consistent=False,
+        max_events_respected=False,
+        status_semantics_valid=False,
+        passed=False,
+        failure_reasons=[reason],
+    )
+
+
+def evaluate_triage_response(
+    case: TriageEvalCase,
+    raw_report: (
+        TriageReport
+        | dict[str, object]
+    ),
+) -> TriageEvalResult:
+    try:
+        report = TriageReport.model_validate(
+            raw_report
+        )
+    except ValidationError:
+        return _invalid_triage_result(
+            case,
+            (
+                "Response did not match the "
+                "TriageReport schema."
+            ),
+        )
+
+    status_correct = (
+        report.status
+        == case.expected_status
+        if case.expected_status is not None
+        else None
+    )
+
+    finding_count_correct = (
+        len(report.findings)
+        == case.expected_finding_count
+        if case.expected_finding_count
+        is not None
+        else None
+    )
+
+    expected_findings_present = (
+        _expected_findings_present(
+            report,
+            case.expected_findings,
+        )
+        if case.expected_findings
+        else None
+    )
+
+    evidence_valid = _evidence_is_valid(
+        report
+    )
+    run_consistent = _run_is_consistent(
+        report
+    )
+    max_events_respected = (
+        len(report.findings)
+        <= case.request.max_events
+    )
+    status_semantics_valid = (
+        _status_semantics_are_valid(
+            report
+        )
+    )
+
+    failure_reasons: list[str] = []
+
+    if status_correct is False:
+        failure_reasons.append(
+            "Triage status did not match the expected status."
+        )
+
+    if finding_count_correct is False:
+        failure_reasons.append(
+            "Finding count did not match the expected count."
+        )
+
+    if expected_findings_present is False:
+        failure_reasons.append(
+            "Expected triage findings were missing."
+        )
+
+    if not evidence_valid:
+        failure_reasons.append(
+            "Finding evidence was missing or inconsistent."
+        )
+
+    if not run_consistent:
+        failure_reasons.append(
+            "Run identifiers were inconsistent."
+        )
+
+    if not max_events_respected:
+        failure_reasons.append(
+            "Triage report exceeded max_events."
+        )
+
+    if not status_semantics_valid:
+        failure_reasons.append(
+            "Triage status semantics were invalid."
+        )
+
+    return TriageEvalResult(
+        case_id=case.case_id,
+        status=report.status,
+        schema_valid=True,
+        status_correct=status_correct,
+        finding_count_correct=(
+            finding_count_correct
+        ),
+        expected_findings_present=(
+            expected_findings_present
+        ),
+        evidence_valid=evidence_valid,
+        run_consistent=run_consistent,
+        max_events_respected=(
+            max_events_respected
+        ),
+        status_semantics_valid=(
+            status_semantics_valid
+        ),
+        passed=not failure_reasons,
+        failure_reasons=failure_reasons,
+    )
+
+
+def run_triage_evals(
+    cases: list[TriageEvalCase],
+    execute_triage: TriageExecutor,
+) -> TriageEvalReport:
+    results: list[TriageEvalResult] = []
+
+    for case in cases:
+        try:
+            report = execute_triage(
+                case.request
+            )
+        except Exception as exc:
+            results.append(
+                _invalid_triage_result(
+                    case,
+                    (
+                        "Triage execution failed "
+                        f"with {type(exc).__name__}."
+                    ),
+                )
+            )
+            continue
+
+        results.append(
+            evaluate_triage_response(
+                case,
+                report,
+            )
+        )
+
+    total_cases = len(results)
+    passed_cases = sum(
+        result.passed
+        for result in results
+    )
+
+    def rate(
+        values: list[bool],
+    ) -> float | None:
+        if not values:
+            return None
+
+        return sum(values) / len(values)
+
+    def required_rate(
+        values: list[bool],
+    ) -> float:
+        if not values:
+            return 0.0
+
+        return sum(values) / len(values)
+
+    status_results = [
+        result.status_correct
+        for result in results
+        if result.status_correct is not None
+    ]
+    finding_results = [
+        result.expected_findings_present
+        for result in results
+        if result.expected_findings_present
+        is not None
+    ]
+    count_results = [
+        result.finding_count_correct
+        for result in results
+        if result.finding_count_correct
+        is not None
+    ]
+
+    return TriageEvalReport(
+        total_cases=total_cases,
+        passed_cases=passed_cases,
+        failed_cases=(
+            total_cases - passed_cases
+        ),
+        schema_validity_rate=required_rate(
+            [
+                result.schema_valid
+                for result in results
+            ]
+        ),
+        evidence_validity_rate=required_rate(
+            [
+                result.evidence_valid
+                for result in results
+            ]
+        ),
+        run_consistency_rate=required_rate(
+            [
+                result.run_consistent
+                for result in results
+            ]
+        ),
+        max_events_compliance_rate=required_rate(
+            [
+                result.max_events_respected
+                for result in results
+            ]
+        ),
+        status_semantics_rate=required_rate(
+            [
+                result.status_semantics_valid
+                for result in results
+            ]
+        ),
+        status_accuracy=rate(
+            status_results
+        ),
+        expected_findings_accuracy=rate(
+            finding_results
+        ),
+        finding_count_accuracy=rate(
+            count_results
+        ),
+        pass_rate=required_rate(
+            [
+                result.passed
+                for result in results
+            ]
         ),
         results=results,
     )

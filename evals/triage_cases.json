@@ -1,0 +1,22 @@
+[
+  {
+    "case_id": "latest-run-default-triage",
+    "request": {
+      "run_id": null,
+      "max_events": 5
+    },
+    "expected_status": null,
+    "expected_findings": [],
+    "expected_finding_count": null
+  },
+  {
+    "case_id": "latest-run-single-finding-limit",
+    "request": {
+      "run_id": null,
+      "max_events": 1
+    },
+    "expected_status": null,
+    "expected_findings": [],
+    "expected_finding_count": null
+  }
+]
