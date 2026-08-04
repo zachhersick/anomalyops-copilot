@@ -20,6 +20,7 @@ from copilot.providers.interfaces import (
     EmbeddingProvider,
     GroundedAnswerGenerator,
 )
+from copilot.observability import trace_span
 
 
 def query_service(
@@ -30,19 +31,38 @@ def query_service(
     embedding_provider: EmbeddingProvider | None = None,
     grounded_answer_generator: GroundedAnswerGenerator | None = None,
 ) -> QueryResponse:
-    selected_chunks = retrieve_chunks_for_query(
-        settings,
-        query_request,
-        session_factory=session_factory,
-        embedding_provider=embedding_provider,
-    )
-    
-    grounded_answer = build_grounded_answer(
-        query=query_request.query,
-        scored_chunks=selected_chunks,
-        min_score=query_request.min_score,
-        generator=grounded_answer_generator,
-    )
+    with trace_span(
+    "query.retrieval",
+    backend=settings.retrieval_backend,
+    top_k=query_request.top_k,
+    ):
+        selected_chunks = retrieve_chunks_for_query(
+            settings,
+            query_request,
+            session_factory=session_factory,
+            embedding_provider=embedding_provider,
+        )
+
+    with trace_span(
+        "query.answer",
+        provider=getattr(
+            grounded_answer_generator,
+            "provider_name",
+            None,
+        ),
+        model=getattr(
+            grounded_answer_generator,
+            "model_name",
+            None,
+        ),
+        context_count=len(selected_chunks),
+    ):
+        grounded_answer = build_grounded_answer(
+            query=query_request.query,
+            scored_chunks=selected_chunks,
+            min_score=query_request.min_score,
+            generator=grounded_answer_generator,
+        )
     
     context_snippets = []
     

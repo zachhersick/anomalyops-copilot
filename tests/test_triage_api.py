@@ -6,6 +6,14 @@ from fastapi.testclient import TestClient
 
 from copilot.api.app import create_app
 from copilot.api.settings import ApiSettings
+from copilot.providers.errors import (
+    InvalidTriageAgentResponseError,
+    TriageAgentProviderError,
+    TriageAgentResourceNotFoundError,
+    TriageAgentToolError,
+)
+from copilot.schemas.anomaly import RunSummary
+from copilot.schemas.triage import TriageReport
 
 
 ANOMALY_API_BASE_URL = "http://anomaly-api.test"
@@ -752,3 +760,173 @@ def test_anomaly_api_client_closes_when_test_client_exits():
         close_spy.assert_not_called()
 
     close_spy.assert_called_once_with()
+    
+    
+def make_no_alerts_report() -> TriageReport:
+    return TriageReport(
+        run_id=42,
+        status="no_alerts",
+        run_summary=RunSummary(
+            **make_run_summary(
+                run_id=42,
+                total_alert_events=0,
+            )
+        ),
+        findings=[],
+        evidence=[],
+    )
+
+
+def test_app_configures_triage_agent():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(
+            f"Unexpected request: {request.method} {request.url}"
+        )
+
+    app = create_test_app(handler)
+
+    assert app.state.triage_agent is not None
+    assert not hasattr(app.state, "triage_service")
+
+
+def test_triage_route_delegates_to_configured_agent():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(
+            f"Unexpected request: {request.method} {request.url}"
+        )
+
+    app = create_test_app(handler)
+
+    agent = Mock()
+    agent.triage.return_value = make_no_alerts_report()
+    app.state.triage_agent = agent
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/triage",
+            json={
+                "run_id": 42,
+                "max_events": 3,
+            },
+        )
+
+    assert response.status_code == 200
+
+    triage_request = agent.triage.call_args.args[0]
+
+    assert triage_request.run_id == 42
+    assert triage_request.max_events == 3
+
+
+def test_triage_maps_agent_resource_not_found_to_404():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(
+            f"Unexpected request: {request.method} {request.url}"
+        )
+
+    app = create_test_app(handler)
+
+    agent = Mock()
+    agent.triage.side_effect = (
+        TriageAgentResourceNotFoundError(
+            "missing"
+        )
+    )
+    app.state.triage_agent = agent
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/triage",
+            json={"run_id": 42},
+        )
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": "The requested run was not found.",
+    }
+
+
+def test_triage_maps_invalid_agent_response_to_502():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(
+            f"Unexpected request: {request.method} {request.url}"
+        )
+
+    app = create_test_app(handler)
+
+    agent = Mock()
+    agent.triage.side_effect = (
+        InvalidTriageAgentResponseError(
+            "invalid"
+        )
+    )
+    app.state.triage_agent = agent
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/triage",
+            json={"run_id": 42},
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": (
+            "Triage agent returned an invalid response."
+        ),
+    }
+
+
+def test_triage_maps_agent_tool_error_to_502():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(
+            f"Unexpected request: {request.method} {request.url}"
+        )
+
+    app = create_test_app(handler)
+
+    agent = Mock()
+    agent.triage.side_effect = (
+        TriageAgentToolError(
+            "failed"
+        )
+    )
+    app.state.triage_agent = agent
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/triage",
+            json={"run_id": 42},
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Anomaly API request failed.",
+    }
+
+
+def test_triage_maps_agent_provider_error_to_502():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError(
+            f"Unexpected request: {request.method} {request.url}"
+        )
+
+    app = create_test_app(handler)
+
+    agent = Mock()
+    agent.triage.side_effect = (
+        TriageAgentProviderError(
+            "failed"
+        )
+    )
+    app.state.triage_agent = agent
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/triage",
+            json={"run_id": 42},
+        )
+
+    assert response.status_code == 502
+    assert response.json() == {
+        "detail": "Triage agent request failed.",
+    }

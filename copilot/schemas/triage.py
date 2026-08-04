@@ -1,5 +1,6 @@
-from typing import Annotated, Optional, Literal
-from pydantic import BaseModel, Field
+from typing import Annotated, Literal, Optional
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from copilot.schemas.anomaly import (
     AlertEvent,
@@ -29,9 +30,43 @@ class TriageFinding(BaseModel):
     evidence_ids: list[str]
 
 
+class TriageFindingDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    severity: Literal[
+        "critical",
+        "warning",
+        "unknown",
+    ]
+    machine_id: int = Field(gt=0)
+    sensor: str = Field(min_length=1)
+    anomaly_type: str | None
+    summary: str = Field(min_length=1)
+    evidence_ids: list[str] = Field(min_length=1)
+
+
+class TriageReportDraft(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: Literal[
+        "completed",
+        "no_alerts",
+        "incomplete_data",
+        "refused",
+    ]
+    findings: list[TriageFindingDraft]
+    refusal_reason: str | None
+
+
 class TriageReport(BaseModel):
-    run_id: int
-    status: Literal["completed", "no_alerts"]
-    run_summary: RunSummary
+    run_id: int | None
+    status: Literal[
+        "completed",
+        "no_alerts",
+        "incomplete_data",
+        "refused",
+    ]
+    run_summary: RunSummary | None
     findings: list[TriageFinding]
     evidence: list[TriageEvidence]
+    refusal_reason: str | None = None
