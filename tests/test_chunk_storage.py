@@ -1,5 +1,9 @@
 from collections.abc import Sequence
-from unittest.mock import MagicMock, patch
+from unittest.mock import (
+    MagicMock,
+    patch,
+    call,
+)
 
 import pytest
 from sqlalchemy.dialects import postgresql
@@ -13,6 +17,8 @@ from copilot.storage.chunks import (
     build_source_chunk_upsert_statement,
     source_chunk_to_values,
     store_source_chunks,
+    embed_source_chunks,
+    replace_source_chunks,
 )
 from copilot.storage.models import EMBEDDING_DIMENSIONS
 
@@ -286,6 +292,241 @@ def test_store_source_chunks_rolls_back_and_reraises_on_failure():
     session.execute.assert_called_once()
     session.commit.assert_not_called()
     session.rollback.assert_called_once_with()
+    
+    
+def test_embed_source_chunks_returns_validated_embeddings():
+    embeddings = [
+        make_embedding(0.25),
+        make_embedding(0.5),
+    ]
+    provider = FakeEmbeddingProvider(
+        embeddings
+    )
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "first",
+        ),
+        make_chunk(
+            "chunk-2",
+            "second",
+        ),
+    ]
+
+    result = embed_source_chunks(
+        chunks,
+        provider,
+    )
+
+    assert result == embeddings
+    assert provider.document_calls == [
+        [
+            "first",
+            "second",
+        ]
+    ]
+
+
+def test_replace_source_chunks_embeds_before_deleting():
+    session = MagicMock()
+    delete_statement = MagicMock()
+    upsert_statement = MagicMock()
+
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "first",
+        ),
+        make_chunk(
+            "chunk-2",
+            "second",
+        ),
+    ]
+    embeddings = [
+        make_embedding(0.25),
+        make_embedding(0.5),
+    ]
+    provider = FakeEmbeddingProvider(
+        embeddings
+    )
+
+    events: list[str] = []
+
+    original_embed_documents = (
+        provider.embed_documents
+    )
+
+    def recording_embed_documents(
+        texts,
+    ):
+        events.append("embed")
+        return original_embed_documents(
+            texts
+        )
+
+    provider.embed_documents = (
+        recording_embed_documents
+    )
+
+    def recording_execute(
+        statement,
+    ):
+        if statement is delete_statement:
+            events.append("delete")
+        elif statement is upsert_statement:
+            events.append("upsert")
+
+    session.execute.side_effect = (
+        recording_execute
+    )
+
+    with (
+        patch(
+            "copilot.storage.chunks.delete",
+            return_value=delete_statement,
+        ),
+        patch(
+            "copilot.storage.chunks."
+            "build_source_chunk_upsert_statement",
+            return_value=upsert_statement,
+        ),
+    ):
+        stored_count = (
+            replace_source_chunks(
+                session=session,
+                chunks=chunks,
+                embedding_provider=provider,
+            )
+        )
+
+    assert stored_count == 2
+    assert events == [
+        "embed",
+        "delete",
+        "upsert",
+    ]
+
+    session.execute.assert_has_calls(
+        [
+            call(delete_statement),
+            call(upsert_statement),
+        ]
+    )
+    session.commit.assert_called_once_with()
+    session.rollback.assert_not_called()
+
+
+def test_replace_source_chunks_provider_failure_preserves_index():
+    session = MagicMock()
+    provider = MagicMock()
+
+    provider.dimensions = (
+        EMBEDDING_DIMENSIONS
+    )
+    provider.embed_documents.side_effect = (
+        RuntimeError(
+            "provider failed"
+        )
+    )
+
+    with pytest.raises(
+        RuntimeError,
+        match="provider failed",
+    ):
+        replace_source_chunks(
+            session=session,
+            chunks=[
+                make_chunk(
+                    "chunk-1",
+                    "text",
+                )
+            ],
+            embedding_provider=provider,
+        )
+
+    session.execute.assert_not_called()
+    session.commit.assert_not_called()
+    session.rollback.assert_not_called()
+
+
+def test_replace_source_chunks_rolls_back_failed_replacement():
+    session = MagicMock()
+    delete_statement = MagicMock()
+    upsert_statement = MagicMock()
+
+    provider = FakeEmbeddingProvider(
+        [
+            make_embedding(),
+        ]
+    )
+    chunks = [
+        make_chunk(
+            "chunk-1",
+            "text",
+        )
+    ]
+
+    session.execute.side_effect = [
+        None,
+        RuntimeError(
+            "insert failed"
+        ),
+    ]
+
+    with (
+        patch(
+            "copilot.storage.chunks.delete",
+            return_value=delete_statement,
+        ),
+        patch(
+            "copilot.storage.chunks."
+            "build_source_chunk_upsert_statement",
+            return_value=upsert_statement,
+        ),
+    ):
+        with pytest.raises(
+            RuntimeError,
+            match="insert failed",
+        ):
+            replace_source_chunks(
+                session=session,
+                chunks=chunks,
+                embedding_provider=provider,
+            )
+
+    session.execute.assert_has_calls(
+        [
+            call(delete_statement),
+            call(upsert_statement),
+        ]
+    )
+    session.commit.assert_not_called()
+    session.rollback.assert_called_once_with()
+
+
+def test_replace_source_chunks_empty_manifest_clears_index():
+    session = MagicMock()
+    delete_statement = MagicMock()
+    provider = FakeEmbeddingProvider([])
+
+    with patch(
+        "copilot.storage.chunks.delete",
+        return_value=delete_statement,
+    ):
+        stored_count = replace_source_chunks(
+            session=session,
+            chunks=[],
+            embedding_provider=provider,
+        )
+
+    assert stored_count == 0
+    assert provider.document_calls == []
+
+    session.execute.assert_called_once_with(
+        delete_statement
+    )
+    session.commit.assert_called_once_with()
+    session.rollback.assert_not_called()
 
 
 def make_chunk(
