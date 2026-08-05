@@ -552,12 +552,7 @@ class OpenAITriageAgent:
                     "Triage finding sensor does not match evidence."
                 )
 
-            if (
-                finding.anomaly_type is not None
-                and event.anomaly_type is not None
-                and event.anomaly_type
-                != finding.anomaly_type
-            ):
+            if event.anomaly_type != finding.anomaly_type:
                 raise InvalidTriageAgentResponseError(
                     "Triage finding anomaly type does not match evidence."
                 )
@@ -689,6 +684,17 @@ class OpenAITriageAgent:
         if len(draft.findings) > request.max_events:
             raise InvalidTriageAgentResponseError(
                 "Triage report contains too many findings."
+            )
+
+        referenced_evidence_ids = {
+            evidence_id
+            for finding in draft.findings
+            for evidence_id in finding.evidence_ids
+        }
+
+        if len(referenced_evidence_ids) > request.max_events:
+            raise InvalidTriageAgentResponseError(
+                "Triage report contains too many evidence events."
             )
 
         findings: list[TriageFinding] = []

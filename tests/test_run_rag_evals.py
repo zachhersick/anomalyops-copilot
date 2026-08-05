@@ -44,7 +44,11 @@ def configure_script(
     monkeypatch,
     report: RagEvalReport,
 ):
-    settings = ApiSettings()
+    settings = ApiSettings(
+        ai_provider="openai",
+        openai_api_key="test-key",
+        grounded_answer_model="gpt-test",
+    )
     generator = object()
     cases = [
         RagEvalCase(
@@ -138,6 +142,7 @@ def test_main_prints_readable_report_and_returns_zero_by_default(
     assert "Refusal accuracy: 100.00%" in output
     assert "Pass rate: 50.00%" in output
     assert captured["cases"] == cases
+    assert captured["generator_settings"].ai_provider == "deterministic"
 
 
 def test_main_strict_returns_one_when_cases_fail(

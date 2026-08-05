@@ -179,6 +179,41 @@ def test_empty_run_returns_no_alerts():
     tools.get_event_alerts.assert_not_called()
 
 
+def test_summary_from_wrong_run_is_rejected():
+    tools = Mock(spec=AnomalyOperationalTools)
+    configure_summary(tools, run_id=99)
+
+    with pytest.raises(TriageServiceError):
+        TriageService(tools).triage(TriageRequest(run_id=42))
+
+
+def test_event_from_wrong_run_is_rejected():
+    tools = Mock(spec=AnomalyOperationalTools)
+    configure_summary(tools, total_alert_events=1)
+    tools.list_alert_events.side_effect = [
+        ListAlertEventsOutput(
+            events=[make_alert_event(7, "critical", 0.95, run_id=99)]
+        ),
+        ListAlertEventsOutput(events=[]),
+    ]
+
+    with pytest.raises(TriageServiceError):
+        TriageService(tools).triage(TriageRequest(run_id=42))
+
+
+def test_missing_reported_events_returns_incomplete_data():
+    tools = Mock(spec=AnomalyOperationalTools)
+    configure_summary(tools, total_alert_events=1)
+    configure_empty_event_results(tools)
+
+    result = TriageService(tools).triage(TriageRequest(run_id=42))
+
+    assert result.status == "incomplete_data"
+    assert result.findings == []
+    assert result.evidence == []
+    assert result.refusal_reason
+
+
 def test_fetches_critical_and_warning_events_with_correct_arguments():
     tools = Mock(spec=AnomalyOperationalTools)
     configure_summary(tools)
@@ -345,6 +380,31 @@ def test_row_alerts_are_sorted_by_step_then_alert_id():
         (105, 7),
         (105, 9),
     ]
+
+
+@pytest.mark.parametrize(
+    "alert",
+    [
+        make_row_alert(alert_id=1, step=1, run_id=99),
+        make_row_alert(alert_id=1, step=1, machine_id=99),
+        make_row_alert(alert_id=1, step=1, sensor="pressure"),
+    ],
+)
+def test_inconsistent_row_alert_is_rejected(alert):
+    tools = Mock(spec=AnomalyOperationalTools)
+    configure_summary(tools, total_alert_events=1)
+    tools.list_alert_events.side_effect = [
+        ListAlertEventsOutput(
+            events=[make_alert_event(7, "critical", 0.95)]
+        ),
+        ListAlertEventsOutput(events=[]),
+    ]
+    tools.get_event_alerts.return_value = GetEventAlertsOutput(
+        alerts=[alert]
+    )
+
+    with pytest.raises(TriageServiceError):
+        TriageService(tools).triage(TriageRequest(run_id=42))
 
 
 def test_findings_reference_existing_evidence():

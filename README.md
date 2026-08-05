@@ -24,10 +24,9 @@ This project builds on the completed [Industrial Anomaly Detection and Alerting 
 
 The source platform includes:
 
-* 50,000 synthetic industrial sensor readings across 10 machines
-* 228 engineered time-series features
-* a Random Forest model with 98.71% accuracy
-* 98.13% anomaly recall
+* controlled synthetic industrial sensor readings across multiple machines
+* engineered time-series features
+* a Random Forest anomaly classifier
 * row-level alerts and grouped alert events
 * SQLite persistence
 * FastAPI endpoints
@@ -134,22 +133,42 @@ Finding IDs are generated locally rather than trusted from model output.
 
 ### Install
 
-```powershell
+```text
 git clone https://github.com/zachhersick/anomalyops-copilot.git
 cd anomalyops-copilot
-
 python -m venv .venv
-.venv\Scripts\Activate.ps1
+```
 
+Activate the environment on macOS or Linux:
+
+```bash
+source .venv/bin/activate
+```
+
+Or on Windows PowerShell:
+
+```text
+.venv\Scripts\Activate.ps1
+```
+
+Then install the project:
+
+```text
 python -m pip install --upgrade pip
 pip install -e ".[dev]"
 ```
 
 ### Configure
 
-Copy the example environment file:
+Copy the example environment file on macOS or Linux:
 
-```powershell
+```bash
+cp .env.example .env
+```
+
+Or on Windows PowerShell:
+
+```text
 Copy-Item .env.example .env
 ```
 
@@ -163,16 +182,14 @@ Do not commit `.env` or expose the key in logs, tests, screenshots, or issue rep
 
 ### Start pgvector
 
-```powershell
+```text
 docker compose up -d postgres
 ```
 
 ### Build the source manifest
 
-```powershell
-python .\scripts\ingest_sources.py `
-  .\data_sources\anomaly_detection_platform `
-  --output .\outputs\chunks.json
+```text
+python scripts/ingest_sources.py data_sources/anomaly_detection_platform --output outputs/chunks.json
 ```
 
 The current source snapshot produces approximately:
@@ -184,8 +201,8 @@ Source chunks: 133
 
 ### Generate and store OpenAI embeddings
 
-```powershell
-python .\scripts\reindex_embeddings.py .\outputs\chunks.json
+```text
+python scripts/reindex_embeddings.py outputs/chunks.json
 ```
 
 Expected result:
@@ -196,8 +213,8 @@ Reindexed 133 source chunks.
 
 ### Run the end-to-end demo
 
-```powershell
-python .\scripts\run_demo.py
+```text
+python scripts/run_demo.py
 ```
 
 The demo exercises:
@@ -237,7 +254,7 @@ The operational triage portion uses real OpenAI tool calls against controlled de
 
 After configuring `.env` and starting Postgres:
 
-```powershell
+```text
 uvicorn copilot.api.app:app --reload
 ```
 
@@ -247,9 +264,15 @@ API documentation is available at:
 http://localhost:8000/docs
 ```
 
-Health check:
+Health check on macOS or Linux:
 
-```powershell
+```bash
+curl --fail http://localhost:8000/health
+```
+
+Or on Windows PowerShell:
+
+```text
 Invoke-RestMethod http://localhost:8000/health
 ```
 
@@ -267,21 +290,15 @@ Returns service health:
 
 ### `POST /query`
 
-Example:
+Submit this payload through the interactive API documentation at `http://localhost:8000/docs`:
 
-```powershell
-$body = @{
-    query = "Which tables store predictions and alerts?"
-    top_k = 3
-    min_score = 0.0
-    show_context = $true
-} | ConvertTo-Json
-
-Invoke-RestMethod `
-    -Method Post `
-    -Uri http://localhost:8000/query `
-    -ContentType "application/json" `
-    -Body $body
+```json
+{
+  "query": "Which tables store predictions and alerts?",
+  "top_k": 3,
+  "min_score": 0.0,
+  "show_context": true
+}
 ```
 
 The response contains:
@@ -298,19 +315,13 @@ A supported answer must contain at least one valid citation. An unsupported answ
 
 The normal API route requires `ANOMALYOPS_ANOMALY_API_BASE_URL` to point to a running anomaly detection API.
 
-Example:
+Submit this payload through `http://localhost:8000/docs`:
 
-```powershell
-$body = @{
-    run_id = 42
-    max_events = 5
-} | ConvertTo-Json
-
-Invoke-RestMethod `
-    -Method Post `
-    -Uri http://localhost:8000/triage `
-    -ContentType "application/json" `
-    -Body $body
+```json
+{
+  "run_id": 42,
+  "max_events": 5
+}
 ```
 
 The response contains:
@@ -364,19 +375,14 @@ The Docker API image currently defaults to this offline manifest configuration s
 
 ### RAG evaluation
 
-```powershell
-python .\scripts\run_rag_evals.py `
-  .\outputs\chunks.json `
-  .\evals\rag_cases.json
+```text
+python scripts/run_rag_evals.py outputs/chunks.json evals/rag_cases.json
 ```
 
 Strict mode returns exit code `1` when any case fails:
 
-```powershell
-python .\scripts\run_rag_evals.py `
-  .\outputs\chunks.json `
-  .\evals\rag_cases.json `
-  --strict
+```text
+python scripts/run_rag_evals.py outputs/chunks.json evals/rag_cases.json --strict
 ```
 
 The RAG harness measures:
@@ -399,15 +405,14 @@ The current deterministic offline baseline intentionally exposes the limitation 
 | Refusal accuracy   |             100% |
 | Overall pass rate  |              30% |
 
-These numbers are not presented as semantic RAG performance. They measure the deterministic fallback. The production demo uses OpenAI embeddings and pgvector and returns semantically relevant source chunks.
+These numbers are not presented as semantic RAG performance. They measure the deterministic fallback. The production demo uses OpenAI embeddings and pgvector; its retrieval quality is verified manually rather than represented by these offline scores.
 
 ### Triage evaluation
 
 The triage evaluator requires a running anomaly API:
 
-```powershell
-python .\scripts\run_triage_evals.py `
-  .\evals\triage_cases.json
+```text
+python scripts/run_triage_evals.py evals/triage_cases.json
 ```
 
 It measures:
@@ -420,6 +425,8 @@ It measures:
 * expected status accuracy
 * expected finding accuracy
 * expected finding-count accuracy
+
+The committed cases currently verify structural and grounding invariants. Expected status, finding, and finding-count accuracy are reported as `N/A` until labeled expectations are added to the fixtures.
 
 Both evaluators support:
 
@@ -495,32 +502,33 @@ Sensitive content is redacted before serialization.
 
 Validate the Compose configuration:
 
-```powershell
+```text
 docker compose config
 ```
 
 Build the API image:
 
-```powershell
+```text
 docker compose build api
 ```
 
 Run the offline API and pgvector services:
 
-```powershell
+```text
 docker compose up -d
 ```
 
 Check service status:
 
-```powershell
+```text
 docker compose ps
-Invoke-RestMethod http://localhost:8000/health
 ```
+
+Then use the health-check command for your operating system from the API section above.
 
 Stop the services:
 
-```powershell
+```text
 docker compose down
 ```
 
@@ -530,13 +538,13 @@ To use the real OpenAI + pgvector mode, start only Postgres with Docker and run 
 
 Run the complete test suite:
 
-```powershell
+```text
 pytest -q
 ```
 
 Run static checks:
 
-```powershell
+```text
 ruff check .
 git diff --check
 ```
@@ -552,7 +560,6 @@ integration
 ```text
 anomalyops-copilot/
 ├── copilot/
-│   ├── agents/             # deterministic and OpenAI triage agents
 │   ├── answering/          # grounded answer orchestration
 │   ├── api/                # FastAPI application and query service
 │   ├── clients/            # anomaly API client
@@ -600,3 +607,7 @@ The demo is reproducible and does not depend on the separate anomaly platform be
 * no authentication or authorization layer is included
 
 These limitations are documented rather than hidden and provide clear next steps for production hardening.
+
+## License
+
+This project is licensed under the MIT License. See [`LICENSE`](LICENSE).

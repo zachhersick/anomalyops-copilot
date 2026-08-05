@@ -1,6 +1,7 @@
 import httpx
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import JSONResponse
 from openai import OpenAI
 from time import perf_counter
 
@@ -135,7 +136,14 @@ def create_app(
                 ),
                 error_type=type(exc).__name__,
             )
-            raise
+            response = JSONResponse(
+                status_code=500,
+                content={
+                    "detail": "Internal server error.",
+                },
+            )
+            response.headers["X-Request-ID"] = request_id
+            return response
         else:
             emit_trace(
                 "http.request",
@@ -156,11 +164,7 @@ def create_app(
                     3,
                 ),
             )
-
-            response.headers["X-Request-ID"] = (
-                request_id
-            )
-
+            response.headers["X-Request-ID"] = request_id
             return response
         finally:
             reset_request_id(

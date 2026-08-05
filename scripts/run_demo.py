@@ -453,6 +453,9 @@ def print_demo(
     print("Tool-Calling Triage")
     print("===================")
     print(
+        "Real OpenAI tool calling over controlled synthetic operational data."
+    )
+    print(
         f"Run: {triage['run_id']}"
     )
     print(
@@ -466,7 +469,9 @@ def print_demo(
             f"machine "
             f"{finding['machine_id']} | "
             f"{finding['sensor']} | "
-            f"{finding['summary']}"
+            f"{finding['summary']} | "
+            "evidence: "
+            f"{', '.join(finding['evidence_ids'])}"
         )
 
 

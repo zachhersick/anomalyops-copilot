@@ -46,6 +46,11 @@ class TriageService:
             summary_result = self._tool.get_run_summary(GetRunSummaryInput(run_id=run_id))
             summary = summary_result.summary
 
+            if summary.run_id != run_id:
+                raise TriageServiceError(
+                    "Operational evidence is inconsistent."
+                )
+
             if summary.total_alert_events == 0:
                 return TriageReport(
                     run_id=run_id,
@@ -75,6 +80,11 @@ class TriageService:
 
             events = critical_result.events + warning_result.events
 
+            if any(event.run_id != run_id for event in events):
+                raise TriageServiceError(
+                    "Operational evidence is inconsistent."
+                )
+
             severity_rank = {
                 "critical": 0,
                 "warning": 1,
@@ -92,6 +102,18 @@ class TriageService:
                     event.event_id,
                 ),
             )[: request.max_events]
+
+            if not selected_events:
+                return TriageReport(
+                    run_id=run_id,
+                    status="incomplete_data",
+                    run_summary=summary,
+                    findings=[],
+                    evidence=[],
+                    refusal_reason=(
+                        "The run summary reported alerts, but no alert events were available."
+                    ),
+                )
 
             findings: list[TriageFinding] = []
             evidence: list[TriageEvidence] = []
@@ -111,6 +133,16 @@ class TriageService:
                         alert.alert_id,
                     ),
                 )
+
+                if any(
+                    alert.run_id != run_id
+                    or alert.machine_id != event.machine_id
+                    or alert.sensor != event.sensor
+                    for alert in sorted_alerts
+                ):
+                    raise TriageServiceError(
+                        "Operational evidence is inconsistent."
+                    )
 
                 evidence_id = f"event-{event.event_id}"
 

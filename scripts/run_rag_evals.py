@@ -59,6 +59,7 @@ def main(
         update={
             "retrieval_backend": "manifest",
             "manifest_path": args.manifest_path,
+            "ai_provider": "deterministic",
         }
     )
 

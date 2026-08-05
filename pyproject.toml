@@ -2,6 +2,7 @@
 name = "anomalyops-copilot"
 version = "0.1.0"
 description = "AI engineering copilot for industrial anomaly detection operations."
+license = { file = "LICENSE" }
 requires-python = ">=3.11"
 dependencies = [
     "fastapi",
