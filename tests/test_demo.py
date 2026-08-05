@@ -229,7 +229,12 @@ def test_print_demo_shows_rag_evidence(
     assert UNSUPPORTED_QUERY in output
     assert "Refused:" in output
     assert "Tool-Calling Triage" in output
+    assert (
+        "Real OpenAI tool calling over controlled synthetic operational data."
+        in output
+    )
     assert "CRITICAL" in output
+    assert "evidence: event-7" in output
 
 
 class FakeResponse:

@@ -263,6 +263,46 @@ def test_http_error_response_includes_request_id(
     assert payload["status_code"] == 500
 
 
+def test_unexpected_error_is_sanitized_and_traced(
+    caplog,
+):
+    app = app_module.create_app(
+        settings=ApiSettings(
+            anomaly_api_base_url=None,
+        )
+    )
+
+    @app.get("/unexpected-error")
+    def unexpected_error():
+        raise RuntimeError("super-secret-error")
+
+    with caplog.at_level(
+        logging.INFO,
+        logger=TRACE_LOGGER_NAME,
+    ):
+        with TestClient(
+            app,
+            raise_server_exceptions=False,
+        ) as client:
+            response = client.get(
+                "/unexpected-error",
+                headers={
+                    "X-Request-ID": "request-123",
+                },
+            )
+
+    assert response.status_code == 500
+    assert response.json() == {
+        "detail": "Internal server error.",
+    }
+    assert response.headers["X-Request-ID"] == "request-123"
+
+    payload = trace_payloads(caplog)[-1]
+    assert payload["status"] == "error"
+    assert payload["error_type"] == "RuntimeError"
+    assert "super-secret-error" not in caplog.text
+
+
 def test_request_id_context_is_reset_after_request():
     app = app_module.create_app(
         settings=ApiSettings(

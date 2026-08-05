@@ -1036,6 +1036,126 @@ def test_finding_machine_must_match_evidence():
         )
 
 
+def test_finding_cannot_invent_missing_anomaly_type():
+    tools = make_tools()
+    tools.get_run_summary.return_value = GetRunSummaryOutput(
+        summary=make_summary()
+    )
+    tools.list_alert_events.return_value = ListAlertEventsOutput(
+        events=[make_event(anomaly_type=None)]
+    )
+    tools.get_event_alerts.return_value = GetEventAlertsOutput(
+        alerts=[make_alert()]
+    )
+
+    client = make_client(
+        tool_response(
+            function_call("get_run_summary", {"run_id": 42})
+        ),
+        tool_response(
+            function_call(
+                "list_alert_events",
+                {
+                    "run_id": 42,
+                    "severity": None,
+                    "sensor": None,
+                    "anomaly_type": None,
+                    "limit": 5,
+                    "offset": 0,
+                },
+            )
+        ),
+        tool_response(
+            function_call(
+                "get_event_alerts",
+                {"run_id": 42, "event_id": 7},
+            )
+        ),
+        final_response(make_completed_draft()),
+    )
+
+    with pytest.raises(InvalidTriageAgentResponseError):
+        OpenAITriageAgent(
+            "gpt-test",
+            client,
+            tools,
+        ).triage(TriageRequest(run_id=42))
+
+
+def test_unique_evidence_events_cannot_exceed_request_limit():
+    tools = make_tools()
+    tools.get_run_summary.return_value = GetRunSummaryOutput(
+        summary=make_summary(total_alert_events=2)
+    )
+    tools.list_alert_events.side_effect = [
+        ListAlertEventsOutput(events=[make_event(event_id=7)]),
+        ListAlertEventsOutput(events=[make_event(event_id=8)]),
+    ]
+    tools.get_event_alerts.side_effect = [
+        GetEventAlertsOutput(alerts=[make_alert(alert_id=10)]),
+        GetEventAlertsOutput(alerts=[make_alert(alert_id=11)]),
+    ]
+    draft = make_completed_draft(
+        findings=[
+            TriageFindingDraft(
+                severity="critical",
+                machine_id=3,
+                sensor="temperature",
+                anomaly_type="spike",
+                summary="Two events.",
+                evidence_ids=["event-7", "event-8"],
+            )
+        ]
+    )
+    list_arguments = {
+        "run_id": 42,
+        "severity": None,
+        "sensor": None,
+        "anomaly_type": None,
+        "limit": 1,
+        "offset": 0,
+    }
+    client = make_client(
+        tool_response(
+            function_call("get_run_summary", {"run_id": 42})
+        ),
+        tool_response(
+            function_call(
+                "list_alert_events",
+                list_arguments,
+                "list-1",
+            ),
+            function_call(
+                "list_alert_events",
+                list_arguments,
+                "list-2",
+            ),
+        ),
+        tool_response(
+            function_call(
+                "get_event_alerts",
+                {"run_id": 42, "event_id": 7},
+                "alerts-1",
+            ),
+            function_call(
+                "get_event_alerts",
+                {"run_id": 42, "event_id": 8},
+                "alerts-2",
+            ),
+        ),
+        final_response(draft),
+    )
+
+    with pytest.raises(InvalidTriageAgentResponseError):
+        OpenAITriageAgent(
+            "gpt-test",
+            client,
+            tools,
+        ).triage(
+            TriageRequest(run_id=42, max_events=1)
+        )
+
+
 def test_completed_requires_run_summary():
     with pytest.raises(
         InvalidTriageAgentResponseError
