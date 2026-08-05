@@ -54,7 +54,8 @@ flowchart TD
     manifestSearch --> context["Ranked source context"]
     semanticSearch --> context
 
-    query["POST /query"] --> context
+    browser["Browser query UI"] --> query["POST /query"]
+    query --> context
     context --> answer["Grounded answer generator"]
     answer --> validation["Citation and schema validation"]
     validation --> response["Answer + confidence + citations<br/>or refusal"]
@@ -255,10 +256,16 @@ The operational triage portion uses real OpenAI tool calls against controlled de
 After configuring `.env` and starting Postgres:
 
 ```text
-uvicorn copilot.api.app:app --reload
+uvicorn copilot.api.app:app --reload --env-file .env
 ```
 
-API documentation is available at:
+The query interface is available at:
+
+```text
+http://localhost:8000/
+```
+
+Interactive API documentation remains available at:
 
 ```text
 http://localhost:8000/docs
@@ -369,7 +376,7 @@ The deterministic embedding provider uses SHA-256-derived vectors. It is useful 
 
 It is not a semantic retrieval model and should not be used to represent production RAG quality.
 
-The Docker API image currently defaults to this offline manifest configuration so it can start without external credentials. The recruiter-facing demo uses the OpenAI + pgvector path.
+The Docker API image and browser UI currently default to this offline manifest configuration so they can start without external credentials. Launching Uvicorn with `--env-file .env` uses the configured OpenAI + pgvector path.
 
 ## Evaluation
 
@@ -568,6 +575,7 @@ anomalyops-copilot/
 │   ├── providers/          # embedding, answer, and agent providers
 │   ├── retrieval/          # manifest and pgvector retrieval
 │   ├── schemas/            # strict Pydantic request and response models
+│   ├── static/             # dependency-free browser query interface
 │   ├── storage/            # SQLAlchemy and pgvector persistence
 │   └── tools/              # read-only operational tools
 ├── data_sources/           # curated source-platform snapshot

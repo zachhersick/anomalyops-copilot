@@ -1,7 +1,9 @@
+from pathlib import Path
+
 import httpx
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 from openai import OpenAI
 from time import perf_counter
 
@@ -175,6 +177,15 @@ def create_app(
     @app.get("/health")
     def health_check():
         return {"status": "ok"}
+
+
+    @app.get("/", include_in_schema=False)
+    def query_frontend() -> FileResponse:
+        return FileResponse(
+            Path(__file__).resolve().parents[1]
+            / "static"
+            / "index.html"
+        )
 
 
     @app.post("/query", response_model=QueryResponse)

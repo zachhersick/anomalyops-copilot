@@ -1,0 +1,583 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>AnomalyOps Copilot</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #07100f;
+      --panel: rgba(13, 27, 25, 0.88);
+      --panel-strong: #10211e;
+      --border: rgba(131, 255, 213, 0.16);
+      --border-bright: rgba(131, 255, 213, 0.34);
+      --text: #edf8f4;
+      --muted: #98afa8;
+      --accent: #73f2c0;
+      --accent-dark: #09251d;
+      --warning: #ffd479;
+      --danger: #ff9a9a;
+      --shadow: 0 24px 70px rgba(0, 0, 0, 0.36);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      min-height: 100vh;
+      margin: 0;
+      color: var(--text);
+      background:
+        radial-gradient(circle at 12% 5%, rgba(42, 128, 99, 0.25), transparent 31rem),
+        radial-gradient(circle at 88% 20%, rgba(26, 76, 100, 0.2), transparent 27rem),
+        var(--bg);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      line-height: 1.55;
+    }
+
+    body::before {
+      position: fixed;
+      inset: 0;
+      z-index: -1;
+      content: "";
+      opacity: 0.28;
+      background-image:
+        linear-gradient(rgba(115, 242, 192, 0.035) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(115, 242, 192, 0.035) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: linear-gradient(to bottom, black, transparent 78%);
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    button,
+    textarea {
+      font: inherit;
+    }
+
+    .shell {
+      width: min(940px, calc(100% - 32px));
+      margin: 0 auto;
+      padding: 64px 0 40px;
+    }
+
+    .eyebrow {
+      display: flex;
+      gap: 9px;
+      align-items: center;
+      margin: 0 0 14px;
+      color: var(--accent);
+      font-size: 0.75rem;
+      font-weight: 750;
+      letter-spacing: 0.16em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow::before {
+      width: 8px;
+      height: 8px;
+      content: "";
+      border-radius: 999px;
+      background: var(--accent);
+      box-shadow: 0 0 18px var(--accent);
+    }
+
+    h1 {
+      max-width: 760px;
+      margin: 0;
+      font-size: clamp(2.35rem, 7vw, 4.9rem);
+      font-weight: 760;
+      letter-spacing: -0.055em;
+      line-height: 0.98;
+    }
+
+    .intro {
+      max-width: 650px;
+      margin: 22px 0 32px;
+      color: var(--muted);
+      font-size: clamp(1rem, 2vw, 1.12rem);
+    }
+
+    .panel {
+      overflow: hidden;
+      border: 1px solid var(--border);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+      backdrop-filter: blur(18px);
+    }
+
+    .composer {
+      padding: clamp(20px, 4vw, 32px);
+    }
+
+    label {
+      display: block;
+      margin-bottom: 10px;
+      color: #c8dad4;
+      font-size: 0.82rem;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    textarea {
+      display: block;
+      width: 100%;
+      min-height: 138px;
+      resize: vertical;
+      padding: 18px;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      outline: none;
+      background: rgba(4, 13, 12, 0.72);
+      transition: border-color 150ms ease, box-shadow 150ms ease;
+    }
+
+    textarea::placeholder {
+      color: #6d857e;
+    }
+
+    textarea:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(115, 242, 192, 0.12);
+    }
+
+    .actions {
+      display: flex;
+      gap: 18px;
+      align-items: center;
+      justify-content: space-between;
+      margin-top: 16px;
+    }
+
+    .hint {
+      margin: 0;
+      color: var(--muted);
+      font-size: 0.84rem;
+    }
+
+    button {
+      min-width: 142px;
+      padding: 11px 18px;
+      color: #062019;
+      border: 0;
+      border-radius: 10px;
+      background: var(--accent);
+      box-shadow: 0 10px 30px rgba(115, 242, 192, 0.16);
+      cursor: pointer;
+      font-weight: 760;
+      transition: transform 150ms ease, filter 150ms ease;
+    }
+
+    button:hover:not(:disabled) {
+      filter: brightness(1.05);
+      transform: translateY(-1px);
+    }
+
+    button:focus-visible {
+      outline: 3px solid rgba(115, 242, 192, 0.32);
+      outline-offset: 3px;
+    }
+
+    button:disabled {
+      cursor: wait;
+      filter: saturate(0.5);
+      opacity: 0.72;
+    }
+
+    .status {
+      min-height: 24px;
+      margin: 14px 2px 0;
+      color: var(--muted);
+      font-size: 0.88rem;
+    }
+
+    .status.error {
+      color: var(--danger);
+    }
+
+    .result {
+      padding: clamp(22px, 4vw, 34px);
+      border-top: 1px solid var(--border);
+      outline: none;
+      background: rgba(5, 15, 14, 0.34);
+    }
+
+    .result-heading {
+      display: flex;
+      gap: 16px;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    h2,
+    h3 {
+      margin: 0;
+    }
+
+    h2 {
+      font-size: 1.12rem;
+      letter-spacing: -0.01em;
+    }
+
+    h3 {
+      margin-bottom: 10px;
+      color: #cfe0da;
+      font-size: 0.8rem;
+      letter-spacing: 0.09em;
+      text-transform: uppercase;
+    }
+
+    .confidence {
+      flex: none;
+      padding: 5px 9px;
+      color: var(--accent);
+      border: 1px solid var(--border-bright);
+      border-radius: 999px;
+      background: var(--accent-dark);
+      font-size: 0.76rem;
+      font-weight: 750;
+    }
+
+    .answer {
+      margin: 0;
+      color: #e7f3ef;
+      font-size: 1.03rem;
+      white-space: pre-wrap;
+    }
+
+    .result.refused .answer {
+      color: var(--warning);
+    }
+
+    .result-section {
+      margin-top: 28px;
+    }
+
+    .citation-list,
+    .context-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .citation,
+    .context-card {
+      padding: 13px 14px;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(7, 20, 18, 0.72);
+    }
+
+    .citation-id {
+      margin-right: 7px;
+      color: var(--accent);
+      font-weight: 750;
+    }
+
+    .source {
+      overflow-wrap: anywhere;
+      color: #bed1ca;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.82rem;
+    }
+
+    details {
+      margin-top: 28px;
+      border-top: 1px solid var(--border);
+      padding-top: 20px;
+    }
+
+    summary {
+      color: #cfe0da;
+      cursor: pointer;
+      font-size: 0.88rem;
+      font-weight: 700;
+    }
+
+    .context-list {
+      margin-top: 14px;
+    }
+
+    .context-meta {
+      margin: 0 0 9px;
+      color: var(--accent);
+      font-size: 0.74rem;
+      font-weight: 700;
+    }
+
+    .context-content {
+      overflow-x: auto;
+      margin: 0;
+      color: #b8cbc4;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      font-size: 0.78rem;
+      white-space: pre-wrap;
+    }
+
+    .request-id {
+      margin: 20px 0 0;
+      color: #6f8981;
+      font-size: 0.74rem;
+    }
+
+    footer {
+      display: flex;
+      gap: 14px;
+      justify-content: space-between;
+      margin-top: 20px;
+      color: #6f8981;
+      font-size: 0.78rem;
+    }
+
+    [hidden] {
+      display: none !important;
+    }
+
+    @media (max-width: 620px) {
+      .shell {
+        width: min(100% - 20px, 940px);
+        padding-top: 38px;
+      }
+
+      .panel {
+        border-radius: 16px;
+      }
+
+      .actions,
+      footer {
+        align-items: stretch;
+        flex-direction: column;
+      }
+
+      button {
+        width: 100%;
+      }
+
+      .result-heading {
+        align-items: flex-start;
+      }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *,
+      *::before,
+      *::after {
+        scroll-behavior: auto !important;
+        transition: none !important;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header>
+      <p class="eyebrow">Grounded operations intelligence</p>
+      <h1>AnomalyOps Copilot</h1>
+      <p class="intro">
+        Ask technical questions about the indexed anomaly-detection platform and get answers grounded in source evidence.
+      </p>
+    </header>
+
+    <main class="panel">
+      <form class="composer" id="query-form">
+        <label for="query">Question</label>
+        <textarea
+          id="query"
+          name="query"
+          required
+          autofocus
+          placeholder="How are alert events grouped and assigned severity?"
+        ></textarea>
+        <div class="actions">
+          <p class="hint">Answers include validated source-line citations.</p>
+          <button id="submit" type="submit">Ask Copilot</button>
+        </div>
+        <p class="status" id="status" role="status" aria-live="polite"></p>
+      </form>
+
+      <article class="result" id="result" tabindex="-1" hidden>
+        <div class="result-heading">
+          <h2 id="result-title">Grounded answer</h2>
+          <span class="confidence" id="confidence"></span>
+        </div>
+        <p class="answer" id="answer"></p>
+
+        <section class="result-section" id="citations" hidden>
+          <h3>Source citations</h3>
+          <div class="citation-list" id="citation-list"></div>
+        </section>
+
+        <details id="context" hidden>
+          <summary>Retrieved source context</summary>
+          <div class="context-list" id="context-list"></div>
+        </details>
+
+        <p class="request-id" id="request-id"></p>
+      </article>
+    </main>
+
+    <footer>
+      <span>Read-only source intelligence</span>
+      <a href="/docs">Open API documentation</a>
+    </footer>
+  </div>
+
+  <script>
+    const form = document.querySelector("#query-form");
+    const queryInput = document.querySelector("#query");
+    const submitButton = document.querySelector("#submit");
+    const status = document.querySelector("#status");
+    const result = document.querySelector("#result");
+    const resultTitle = document.querySelector("#result-title");
+    const answer = document.querySelector("#answer");
+    const confidence = document.querySelector("#confidence");
+    const citations = document.querySelector("#citations");
+    const citationList = document.querySelector("#citation-list");
+    const context = document.querySelector("#context");
+    const contextList = document.querySelector("#context-list");
+    const requestId = document.querySelector("#request-id");
+
+    function makeElement(tag, className, text) {
+      const element = document.createElement(tag);
+      element.className = className;
+      element.textContent = text;
+      return element;
+    }
+
+    function setBusy(isBusy) {
+      submitButton.disabled = isBusy;
+      submitButton.textContent = isBusy ? "Asking…" : "Ask Copilot";
+      form.setAttribute("aria-busy", String(isBusy));
+    }
+
+    function formatDetail(detail, statusCode) {
+      if (typeof detail === "string") {
+        return detail;
+      }
+
+      if (Array.isArray(detail)) {
+        return detail
+          .map((item) => item && item.msg)
+          .filter(Boolean)
+          .join(" ");
+      }
+
+      return `Request failed (${statusCode}).`;
+    }
+
+    function renderCitations(items) {
+      citationList.replaceChildren();
+      citations.hidden = items.length === 0;
+
+      for (const item of items) {
+        const card = document.createElement("div");
+        card.className = "citation";
+        card.append(
+          makeElement("span", "citation-id", `[${item.citation_id}]`),
+          makeElement(
+            "span",
+            "source",
+            `${item.source_path}:${item.start_line}-${item.end_line}`,
+          ),
+        );
+        citationList.append(card);
+      }
+    }
+
+    function renderContext(items) {
+      contextList.replaceChildren();
+      context.hidden = items.length === 0;
+      context.open = false;
+
+      for (const item of items) {
+        const card = document.createElement("div");
+        card.className = "context-card";
+        card.append(
+          makeElement(
+            "p",
+            "context-meta",
+            `[${item.citation_id}] ${item.source_path}:${item.start_line}-${item.end_line} · score ${Number(item.score).toFixed(3)}`,
+          ),
+          makeElement("pre", "context-content", item.content),
+        );
+        contextList.append(card);
+      }
+    }
+
+    function renderResult(payload, responseRequestId) {
+      const refused = Boolean(payload.refusal_reason);
+      result.classList.toggle("refused", refused);
+      resultTitle.textContent = refused
+        ? "Not supported by indexed sources"
+        : "Grounded answer";
+      answer.textContent = refused ? payload.refusal_reason : payload.answer;
+      confidence.textContent = `${Math.round(Number(payload.confidence) * 100)}% confidence`;
+      requestId.textContent = responseRequestId
+        ? `Request ID: ${responseRequestId}`
+        : "";
+      renderCitations(payload.citations || []);
+      renderContext(payload.context_snippets || []);
+      result.hidden = false;
+      result.focus();
+    }
+
+    queryInput.addEventListener("input", () => {
+      queryInput.setCustomValidity("");
+    });
+
+    form.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      const query = queryInput.value.trim();
+
+      if (!query) {
+        queryInput.setCustomValidity("Enter a question.");
+        queryInput.reportValidity();
+        return;
+      }
+
+      setBusy(true);
+      result.hidden = true;
+      status.classList.remove("error");
+      status.textContent = "Searching indexed sources…";
+      let responseRequestId = "";
+
+      try {
+        const response = await fetch("/query", {
+          method: "POST",
+          headers: {"Content-Type": "application/json"},
+          body: JSON.stringify({query, show_context: true}),
+        });
+        responseRequestId = response.headers.get("X-Request-ID") || "";
+        const payload = await response.json().catch(() => ({}));
+
+        if (!response.ok) {
+          throw new Error(formatDetail(payload.detail, response.status));
+        }
+
+        renderResult(payload, responseRequestId);
+        status.textContent = payload.refusal_reason
+          ? "No supported answer was found in the indexed sources."
+          : "Answer grounded in retrieved source context.";
+      } catch (error) {
+        const message = error instanceof Error
+          ? error.message
+          : "The query could not be completed.";
+        status.classList.add("error");
+        status.textContent = responseRequestId
+          ? `${message} Request ID: ${responseRequestId}`
+          : message;
+      } finally {
+        setBusy(false);
+      }
+    });
+  </script>
+</body>
+</html>
