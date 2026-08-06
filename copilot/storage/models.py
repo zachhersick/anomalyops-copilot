@@ -3,7 +3,7 @@ from sqlalchemy import String, Text, Integer
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
-EMBEDDING_DIMENSIONS = 16
+EMBEDDING_DIMENSIONS = 256
 
 
 class Base(DeclarativeBase):

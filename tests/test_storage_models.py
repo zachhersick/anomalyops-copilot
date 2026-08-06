@@ -66,11 +66,11 @@ def test_source_chunk_record_chunk_id_is_unique():
     assert table.columns["chunk_id"].unique is True
 
 
-def test_source_chunk_record_embedding_is_vector_16():
+def test_source_chunk_record_embedding_is_vector_256():
     embedding_type = (
         SourceChunkRecord.__table__.columns["embedding"].type
     )
 
     assert isinstance(embedding_type, VECTOR)
     assert embedding_type.dim == EMBEDDING_DIMENSIONS
-    assert EMBEDDING_DIMENSIONS == 16
+    assert EMBEDDING_DIMENSIONS == 256

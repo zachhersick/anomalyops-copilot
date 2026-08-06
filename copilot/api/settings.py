@@ -28,7 +28,7 @@ class ApiSettings(BaseModel):
     grounded_answer_model: str | None = None
     triage_model: str | None = None
     openai_api_key: str | None = None
-    embedding_dimensions: int = 16
+    embedding_dimensions: int = 256
     
     
 def load_api_settings() -> ApiSettings:
@@ -95,7 +95,7 @@ def load_api_settings() -> ApiSettings:
     
     embedding_dimensions_value = os.environ.get(
         EMBEDDING_DIMENSIONS_ENV_VAR,
-        "16",
+        "256",
     )
     
     try:

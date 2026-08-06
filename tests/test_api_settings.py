@@ -239,13 +239,13 @@ def test_load_api_settings_rejects_invalid_ai_provider(
         load_api_settings()
         
         
-def test_api_settings_defaults_embedding_dimensions_to_16():
+def test_api_settings_defaults_embedding_dimensions_to_256():
     settings = ApiSettings()
 
-    assert settings.embedding_dimensions == 16
+    assert settings.embedding_dimensions == 256
 
 
-def test_load_api_settings_defaults_embedding_dimensions_to_16(
+def test_load_api_settings_defaults_embedding_dimensions_to_256(
     monkeypatch,
 ):
     monkeypatch.delenv(
@@ -255,7 +255,7 @@ def test_load_api_settings_defaults_embedding_dimensions_to_16(
 
     settings = load_api_settings()
 
-    assert settings.embedding_dimensions == 16
+    assert settings.embedding_dimensions == 256
 
 
 def test_load_api_settings_reads_embedding_dimensions(

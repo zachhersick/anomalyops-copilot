@@ -33,7 +33,7 @@ def make_settings(
         ),
         triage_model="gpt-5-mini",
         openai_api_key="test-key",
-        embedding_dimensions=16,
+        embedding_dimensions=256,
     )
 
     return settings.model_copy(
