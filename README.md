@@ -380,7 +380,7 @@ The Docker API image and browser UI currently default to this offline manifest c
 
 ## Evaluation
 
-### RAG evaluation
+### Offline contract evaluation
 
 ```text
 python scripts/run_rag_evals.py outputs/chunks.json evals/rag_cases.json
@@ -392,7 +392,7 @@ Strict mode returns exit code `1` when any case fails:
 python scripts/run_rag_evals.py outputs/chunks.json evals/rag_cases.json --strict
 ```
 
-The RAG harness measures:
+The offline RAG harness measures:
 
 * response schema validity
 * expected-source retrieval hit rate
@@ -412,7 +412,43 @@ The current deterministic offline baseline intentionally exposes the limitation 
 | Refusal accuracy   |             100% |
 | Overall pass rate  |              30% |
 
-These numbers are not presented as semantic RAG performance. They measure the deterministic fallback. The production demo uses OpenAI embeddings and pgvector; its retrieval quality is verified manually rather than represented by these offline scores.
+These numbers are not production retrieval KPIs. SHA-256-derived vectors deliberately trade semantic quality for repeatable checks of orchestration, schemas, citations, refusal thresholds, and error handling.
+
+### Semantic OpenAI + pgvector evaluation
+
+After reindexing the configured pgvector database, run the labeled production path locally:
+
+```text
+python scripts/reindex_embeddings.py outputs/chunks.json
+
+python scripts/run_rag_evals.py \
+  outputs/chunks.json \
+  evals/semantic_rag_cases.json \
+  --mode semantic \
+  --output evals/results/openai-pgvector-2026-08-05.json
+```
+
+Semantic mode reads the existing `.env`, requires OpenAI and pgvector, verifies that the complete database index matches the manifest and embedding configuration, and never reindexes automatically. It adds retrieval ranking, expected-answer-term, and refusal precision/recall metrics to the structural checks.
+
+The first committed [OpenAI + pgvector snapshot](evals/results/openai-pgvector-2026-08-05.json) records the untuned baseline honestly:
+
+| Metric                       | Semantic baseline |
+| ---------------------------- | ----------------: |
+| Schema validity              |              100% |
+| Retrieval hit rate           |               40% |
+| Hit rate at 3                |               40% |
+| Hit rate at 5                |               40% |
+| Mean reciprocal rank at 5    |              0.256 |
+| Mean source recall at 5      |             28.9% |
+| Citation validity            |              100% |
+| Citation hit rate            |             26.7% |
+| Refusal accuracy             |               60% |
+| Refusal precision            |             38.5% |
+| Refusal recall               |              100% |
+| Expected-answer-term accuracy|             26.7% |
+| Overall pass rate            |               40% |
+
+The snapshot establishes where semantic retrieval and grounding need improvement; it is evidence for later tuning, not a claim of production readiness. Paid OpenAI evaluation stays local and is not run in CI.
 
 ### Triage evaluation
 
@@ -579,7 +615,7 @@ anomalyops-copilot/
 │   ├── storage/            # SQLAlchemy and pgvector persistence
 │   └── tools/              # read-only operational tools
 ├── data_sources/           # curated source-platform snapshot
-├── evals/                  # RAG and triage evaluation cases
+├── evals/                  # evaluation cases and sanitized semantic results
 ├── scripts/                # ingestion, indexing, eval, query, and demo CLIs
 ├── tests/                  # unit and integration tests
 ├── Dockerfile
@@ -610,7 +646,7 @@ The demo is reproducible and does not depend on the separate anomaly platform be
 * the indexed corpus is a curated snapshot rather than a continuously synchronized repository
 * the database vector dimension is currently fixed at 16
 * the Docker API defaults to offline deterministic mode
-* the RAG evaluation CLI currently benchmarks manifest retrieval rather than the pgvector production path
+* the first semantic evaluation snapshot is an untuned baseline with material retrieval misses
 * the demo uses controlled anomaly API data for reproducible triage
 * no authentication or authorization layer is included
 

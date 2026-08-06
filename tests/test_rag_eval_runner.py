@@ -159,6 +159,38 @@ def test_evaluate_supported_answer_passes():
     assert result.failure_reasons == []
 
 
+def test_evaluate_checks_normalized_answer_terms():
+    case = make_case()
+    case.expected_answer_terms = [
+        "engineered_features",
+        "prediction-api",
+    ]
+
+    passing = evaluate_rag_response(
+        case,
+        make_answered_response(
+            answer=(
+                "The prediction API accepts "
+                "engineered features [1]."
+            ),
+        ),
+    )
+    failing = evaluate_rag_response(
+        case,
+        make_answered_response(
+            answer="The prediction API accepts input [1].",
+        ),
+    )
+
+    assert passing.answer_terms_present is True
+    assert passing.passed is True
+    assert failing.answer_terms_present is False
+    assert failing.passed is False
+    assert failing.failure_reasons[-1] == (
+        "Answer did not contain all expected terms."
+    )
+
+
 def test_source_path_matching_accepts_windows_absolute_paths():
     source_path = (
         r"C:\Dev\anomalyops-copilot\data_sources"
@@ -424,6 +456,75 @@ def test_run_rag_evals_builds_requests_and_aggregates_rates():
     assert report.citation_hit_rate == pytest.approx(0.5)
     assert report.refusal_accuracy == pytest.approx(1.0)
     assert report.pass_rate == pytest.approx(2 / 3)
+    assert report.hit_rate_at_3 == pytest.approx(0.5)
+    assert report.hit_rate_at_5 == pytest.approx(0.5)
+    assert report.mean_reciprocal_rank_at_5 == pytest.approx(0.5)
+    assert report.mean_source_recall_at_5 == pytest.approx(0.5)
+    assert report.answer_term_accuracy is None
+    assert report.refusal_precision == pytest.approx(1.0)
+    assert report.refusal_recall == pytest.approx(1.0)
+
+
+def test_run_rag_evals_calculates_rank_recall_and_answer_metrics():
+    case = RagEvalCase(
+        case_id="ranked",
+        query="ranked sources",
+        expected_source_paths=[
+            "source_code/api.py",
+            "source_code/model.py",
+        ],
+        expected_answer_terms=[
+            "feature_columns",
+        ],
+        top_k=5,
+    )
+    response = make_answered_response(
+        source_path="source_code/dashboard.py",
+        answer="The feature columns are ordered [3].",
+        citation_id=3,
+        context_citation_id=1,
+    )
+    response.context_snippets.append(
+        ContextSnippet(
+            citation_id=2,
+            source_path="source_code/dashboard.py",
+            start_line=21,
+            end_line=29,
+            content="More dashboard context.",
+            score=0.85,
+        )
+    )
+    response.context_snippets.append(
+        ContextSnippet(
+            citation_id=3,
+            source_path="source_code/api.py",
+            start_line=30,
+            end_line=40,
+            content="Feature columns are ordered.",
+            score=0.8,
+        )
+    )
+    response.citations[0].source_path = (
+        "source_code/api.py"
+    )
+    response.citations[0].start_line = 30
+    response.citations[0].end_line = 40
+
+    report = run_rag_evals(
+        [case],
+        lambda request: response,
+    )
+    result = report.results[0]
+
+    assert result.first_relevant_rank == 3
+    assert result.relevant_source_recall == pytest.approx(0.5)
+    assert report.hit_rate_at_3 == pytest.approx(1.0)
+    assert report.hit_rate_at_5 == pytest.approx(1.0)
+    assert report.mean_reciprocal_rank_at_5 == pytest.approx(1 / 3)
+    assert report.mean_source_recall_at_5 == pytest.approx(0.5)
+    assert report.answer_term_accuracy == pytest.approx(1.0)
+    assert report.refusal_precision is None
+    assert report.refusal_recall is None
 
 
 def test_run_rag_evals_records_executor_error_and_continues():
