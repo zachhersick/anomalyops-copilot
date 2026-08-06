@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Added a local OpenAI + pgvector RAG evaluation mode with labeled semantic cases, ranking and refusal metrics, index consistency checks, and sanitized result snapshots.
+
 ## 0.1.0 - 2026-08-05
 
 - Added semantic source retrieval with OpenAI embeddings and pgvector.

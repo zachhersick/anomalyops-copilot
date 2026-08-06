@@ -159,6 +159,72 @@ def _contains_expected_source(
     )
 
 
+def _relevant_source_stats(
+    actual_paths: list[str],
+    expected_paths: list[str],
+) -> tuple[int | None, float]:
+    actual_paths = actual_paths[:5]
+    first_rank = next(
+        (
+            rank
+            for rank, actual_path in enumerate(
+                actual_paths,
+                start=1,
+            )
+            if any(
+                _source_path_matches(
+                    actual_path,
+                    expected_path,
+                )
+                for expected_path in expected_paths
+            )
+        ),
+        None,
+    )
+    matched_expected = sum(
+        any(
+            _source_path_matches(
+                actual_path,
+                expected_path,
+            )
+            for actual_path in actual_paths
+        )
+        for expected_path in expected_paths
+    )
+
+    return (
+        first_rank,
+        matched_expected / len(expected_paths),
+    )
+
+
+def _normalize_answer_text(value: str) -> str:
+    return " ".join(
+        value.lower()
+        .replace("_", " ")
+        .replace("-", " ")
+        .split()
+    )
+
+
+def _answer_terms_present(
+    answer: str,
+    expected_terms: list[str],
+) -> bool | None:
+    if not expected_terms:
+        return None
+
+    normalized_answer = _normalize_answer_text(
+        answer
+    )
+
+    return all(
+        _normalize_answer_text(term)
+        in normalized_answer
+        for term in expected_terms
+    )
+
+
 def _validate_response_citations(
     response: QueryResponse,
 ) -> bool:
@@ -246,6 +312,16 @@ def _invalid_rag_result(
         citations_valid=False,
         citation_hit=False,
         refusal_correct=False,
+        relevant_source_recall=(
+            None
+            if case.expect_refusal
+            else 0.0
+        ),
+        answer_terms_present=(
+            False
+            if case.expected_answer_terms
+            else None
+        ),
         passed=False,
         failure_reasons=[reason],
     )
@@ -268,11 +344,12 @@ def evaluate_rag_response(
             "Response did not match the QueryResponse schema.",
         )
 
+    ranked_source_paths = [
+        snippet.source_path
+        for snippet in response.context_snippets
+    ]
     retrieved_source_paths = _unique_paths(
-        [
-            snippet.source_path
-            for snippet in response.context_snippets
-        ]
+        ranked_source_paths
     )
     cited_source_paths = _unique_paths(
         [
@@ -280,6 +357,18 @@ def evaluate_rag_response(
             for citation in response.citations
         ]
     )
+
+    if case.expect_refusal:
+        first_relevant_rank = None
+        relevant_source_recall = None
+    else:
+        (
+            first_relevant_rank,
+            relevant_source_recall,
+        ) = _relevant_source_stats(
+            ranked_source_paths,
+            case.expected_source_paths,
+        )
 
     retrieval_hit = (
         True
@@ -312,6 +401,12 @@ def evaluate_rag_response(
         actual_refusal
         == case.expect_refusal
     )
+    answer_terms_present = (
+        _answer_terms_present(
+            response.answer,
+            case.expected_answer_terms,
+        )
+    )
 
     failure_reasons: list[str] = []
 
@@ -333,6 +428,11 @@ def evaluate_rag_response(
     if not refusal_correct:
         failure_reasons.append(
             "Refusal behavior did not match the case expectation."
+        )
+
+    if answer_terms_present is False:
+        failure_reasons.append(
+            "Answer did not contain all expected terms."
         )
 
     passed = not failure_reasons
@@ -358,6 +458,15 @@ def evaluate_rag_response(
         citations_valid=citations_valid,
         citation_hit=citation_hit,
         refusal_correct=refusal_correct,
+        first_relevant_rank=(
+            first_relevant_rank
+        ),
+        relevant_source_recall=(
+            relevant_source_recall
+        ),
+        answer_terms_present=(
+            answer_terms_present
+        ),
         passed=passed,
         failure_reasons=failure_reasons,
     )
@@ -444,6 +553,31 @@ def run_rag_evals(
 
         return numerator / denominator
 
+    answer_term_results = [
+        result
+        for result in supported_results
+        if result.answer_terms_present
+        is not None
+    ]
+    actual_refusals = [
+        result
+        for result in results
+        if result.status == "refused"
+    ]
+    true_refusals = sum(
+        result.status == "refused"
+        for result in refusal_results
+    )
+
+    def optional_rate(
+        numerator: int,
+        denominator: int,
+    ) -> float | None:
+        if denominator == 0:
+            return None
+
+        return numerator / denominator
+
     return RagEvalReport(
         total_cases=total_cases,
         passed_cases=passed_cases,
@@ -488,6 +622,58 @@ def run_rag_evals(
         pass_rate=rate(
             passed_cases,
             total_cases,
+        ),
+        hit_rate_at_3=rate(
+            sum(
+                result.first_relevant_rank
+                is not None
+                and result.first_relevant_rank <= 3
+                for result in supported_results
+            ),
+            supported_cases,
+        ),
+        hit_rate_at_5=rate(
+            sum(
+                result.first_relevant_rank
+                is not None
+                and result.first_relevant_rank <= 5
+                for result in supported_results
+            ),
+            supported_cases,
+        ),
+        mean_reciprocal_rank_at_5=rate(
+            sum(
+                1 / result.first_relevant_rank
+                for result in supported_results
+                if result.first_relevant_rank
+                is not None
+                and result.first_relevant_rank <= 5
+            ),
+            supported_cases,
+        ),
+        mean_source_recall_at_5=rate(
+            sum(
+                result.relevant_source_recall
+                or 0.0
+                for result in supported_results
+            ),
+            supported_cases,
+        ),
+        answer_term_accuracy=optional_rate(
+            sum(
+                result.answer_terms_present
+                is True
+                for result in answer_term_results
+            ),
+            len(answer_term_results),
+        ),
+        refusal_precision=optional_rate(
+            true_refusals,
+            len(actual_refusals),
+        ),
+        refusal_recall=optional_rate(
+            true_refusals,
+            refusal_cases,
         ),
         results=results,
     )

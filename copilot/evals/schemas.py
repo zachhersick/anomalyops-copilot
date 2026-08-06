@@ -35,6 +35,9 @@ class RagEvalCase(BaseModel):
     expect_refusal: bool = False
     top_k: int = Field(default=3, gt=0)
     min_score: float = Field(default=0.0, ge=0.0)
+    expected_answer_terms: list[str] = Field(
+        default_factory=list,
+    )
 
     @model_validator(mode="after")
     def validate_expected_sources(self):
@@ -44,6 +47,14 @@ class RagEvalCase(BaseModel):
         ):
             raise ValueError(
                 "Supported RAG cases require expected source paths."
+            )
+
+        if any(
+            not term.strip()
+            for term in self.expected_answer_terms
+        ):
+            raise ValueError(
+                "Expected answer terms cannot be blank."
             )
 
         return self
@@ -64,6 +75,9 @@ class RagEvalResult(BaseModel):
     citations_valid: bool
     citation_hit: bool
     refusal_correct: bool
+    first_relevant_rank: int | None = None
+    relevant_source_recall: float | None = None
+    answer_terms_present: bool | None = None
     passed: bool
     failure_reasons: list[str]
 
@@ -80,6 +94,13 @@ class RagEvalReport(BaseModel):
     citation_hit_rate: float
     refusal_accuracy: float
     pass_rate: float
+    hit_rate_at_3: float = 0.0
+    hit_rate_at_5: float = 0.0
+    mean_reciprocal_rank_at_5: float = 0.0
+    mean_source_recall_at_5: float = 0.0
+    answer_term_accuracy: float | None = None
+    refusal_precision: float | None = None
+    refusal_recall: float | None = None
     results: list[RagEvalResult]
     
     

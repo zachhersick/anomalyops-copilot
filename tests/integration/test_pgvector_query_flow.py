@@ -25,6 +25,7 @@ from copilot.providers.deterministic_answers import (
     DeterministicGroundedAnswerGenerator,
 )
 from copilot.schemas.query import QueryRequest
+from scripts.run_rag_evals import validate_semantic_index
 
 
 @pytest.mark.integration
@@ -210,6 +211,12 @@ def test_pgvector_query_flow_returns_deterministic_grounded_answer(
         )
 
     assert stored_chunks == 1
+
+    validate_semantic_index(
+        session_factory,
+        [chunk],
+        embedding_provider,
+    )
 
     response = query_service(
         settings=ApiSettings(
