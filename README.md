@@ -1,8 +1,18 @@
 # AnomalyOps Copilot
 
+[![CI](https://github.com/zachhersick/anomalyops-copilot/actions/workflows/ci.yml/badge.svg)](https://github.com/zachhersick/anomalyops-copilot/actions/workflows/ci.yml)
+
 An AI engineering layer for an industrial anomaly detection platform, combining semantic retrieval, grounded generation, tool calling, structured outputs, evaluation, and request tracing.
 
 AnomalyOps Copilot ingests the source code and documentation of an existing anomaly detection system, stores searchable embeddings in Postgres with pgvector, answers technical questions with source citations, and triages operational alert events through validated tool calls.
+
+![AnomalyOps Copilot answering a grounded operations question with confidence, citations, and retrieved context](docs/assets/query-demo.png)
+
+## At a glance
+
+* **Production RAG path:** OpenAI embeddings, pgvector cosine retrieval, grounded structured answers, exact source-line citations, and explicit refusals.
+* **Guarded operations agent:** bounded read-only tool calls, validated evidence, request tracing, and sanitized failures.
+* **Measured quality:** the versioned 20-case OpenAI + pgvector evaluation reaches 93.3% Hit@5, 0.733 MRR@5, and a 75% overall pass rate.
 
 ## What this project demonstrates
 
@@ -349,7 +359,7 @@ Omit `run_id` to triage the latest available run.
 | `ANOMALYOPS_DATABASE_URL`          | pgvector retrieval | SQLAlchemy Postgres connection URL                       |
 | `ANOMALYOPS_AI_PROVIDER`           | Always             | `deterministic` or `openai`                              |
 | `ANOMALYOPS_EMBEDDING_MODEL`       | OpenAI embeddings  | Embedding model name                                     |
-| `ANOMALYOPS_EMBEDDING_DIMENSIONS`  | Embedding storage  | Must match the database vector dimension; currently `16` |
+| `ANOMALYOPS_EMBEDDING_DIMENSIONS`  | Embedding storage  | Must match the database vector dimension; currently `256` |
 | `ANOMALYOPS_GROUNDED_ANSWER_MODEL` | OpenAI answers     | Model used for grounded generation                       |
 | `ANOMALYOPS_TRIAGE_MODEL`          | OpenAI triage      | Model used for the tool-calling agent                    |
 | `ANOMALYOPS_ANOMALY_API_BASE_URL`  | Normal triage API  | Base URL of the anomaly detection API                    |
@@ -425,30 +435,38 @@ python scripts/run_rag_evals.py \
   outputs/chunks.json \
   evals/semantic_rag_cases.json \
   --mode semantic \
-  --output evals/results/openai-pgvector-2026-08-05.json
+  --output evals/results/openai-pgvector-2026-08-06.json
 ```
 
 Semantic mode reads the existing `.env`, requires OpenAI and pgvector, verifies that the complete database index matches the manifest and embedding configuration, and never reindexes automatically. It adds retrieval ranking, expected-answer-term, and refusal precision/recall metrics to the structural checks.
 
-The first committed [OpenAI + pgvector snapshot](evals/results/openai-pgvector-2026-08-05.json) records the untuned baseline honestly:
+Databases created with the earlier 16-dimensional schema must recreate the reproducible `source_chunks` index once before reindexing. Fresh databases require no upgrade step:
 
-| Metric                       | Semantic baseline |
-| ---------------------------- | ----------------: |
-| Schema validity              |              100% |
-| Retrieval hit rate           |               40% |
-| Hit rate at 3                |               40% |
-| Hit rate at 5                |               40% |
-| Mean reciprocal rank at 5    |              0.256 |
-| Mean source recall at 5      |             28.9% |
-| Citation validity            |              100% |
-| Citation hit rate            |             26.7% |
-| Refusal accuracy             |               60% |
-| Refusal precision            |             38.5% |
-| Refusal recall               |              100% |
-| Expected-answer-term accuracy|             26.7% |
-| Overall pass rate            |               40% |
+```text
+docker compose exec postgres \
+  psql -U anomalyops -d anomalyops \
+  -c "DROP TABLE IF EXISTS source_chunks;"
+```
 
-The snapshot establishes where semantic retrieval and grounding need improvement; it is evidence for later tuning, not a claim of production readiness. Paid OpenAI evaluation stays local and is not run in CI.
+The current committed [OpenAI + pgvector snapshot](evals/results/openai-pgvector-2026-08-06.json) records the measured 256-dimensional configuration:
+
+| Metric                        | Semantic result |
+| ----------------------------- | --------------: |
+| Schema validity               |            100% |
+| Retrieval hit rate            |           93.3% |
+| Hit rate at 3                 |           93.3% |
+| Hit rate at 5                 |           93.3% |
+| Mean reciprocal rank at 5     |           0.733 |
+| Mean source recall at 5       |           66.7% |
+| Citation validity             |            100% |
+| Citation hit rate             |           66.7% |
+| Refusal accuracy              |             90% |
+| Refusal precision             |           71.4% |
+| Refusal recall                |            100% |
+| Expected-answer-term accuracy |             80% |
+| Overall pass rate             |             75% |
+
+Increasing the embedding dimension from 16 to 256 raised Hit@5 from 40% to 93.3%, MRR@5 from 0.256 to 0.733, and overall pass rate from 40% to 75% on the same cases and corpus. The remaining failures stay visible in the snapshot rather than being tuned away. Paid OpenAI evaluation stays local and is not run in CI.
 
 ### Triage evaluation
 
@@ -644,9 +662,9 @@ The demo is reproducible and does not depend on the separate anomaly platform be
 ## Current limitations
 
 * the indexed corpus is a curated snapshot rather than a continuously synchronized repository
-* the database vector dimension is currently fixed at 16
+* the database vector dimension is fixed at 256 and requires an index rebuild to change
 * the Docker API defaults to offline deterministic mode
-* the first semantic evaluation snapshot is an untuned baseline with material retrieval misses
+* the semantic evaluation still has five failing cases that require evidence-driven retrieval or grounding improvements
 * the demo uses controlled anomaly API data for reproducible triage
 * no authentication or authorization layer is included
 

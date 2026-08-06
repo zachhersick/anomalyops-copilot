@@ -3,6 +3,8 @@
 ## Unreleased
 
 - Added a local OpenAI + pgvector RAG evaluation mode with labeled semantic cases, ranking and refusal metrics, index consistency checks, and sanitized result snapshots.
+- Increased embedding storage from 16 to 256 dimensions after the same semantic suite improved from 40% to 93.3% Hit@5 and from 40% to 75% overall pass rate.
+- Added a recruiter-focused project preview, concise technical highlights, and CI status to the README.
 
 ## 0.1.0 - 2026-08-05
 
