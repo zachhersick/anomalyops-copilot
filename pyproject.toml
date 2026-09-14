@@ -17,13 +17,13 @@ dependencies = [
     "numpy",
     "pandas",
     "tiktoken",
+    "httpx",
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest",
     "pytest-cov",
-    "httpx",
     "ruff",
 ]
 
