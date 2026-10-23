@@ -6,6 +6,8 @@ An AI engineering layer for an industrial anomaly detection platform, combining 
 
 AnomalyOps Copilot ingests the source code and documentation of an existing anomaly detection system, stores searchable embeddings in Postgres with pgvector, answers technical questions with source citations, and triages operational alert events through validated tool calls.
 
+New to the codebase? Start with the [developer handbook](docs/handbook/README.md) for setup, architecture, a linked file map, data pipelines, API contracts, development workflows, and an evidence-backed review of current limitations.
+
 ![AnomalyOps Copilot answering a grounded operations question with confidence, citations, and retrieved context](docs/assets/query-demo.png)
 
 ## At a glance
